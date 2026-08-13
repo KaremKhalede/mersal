@@ -1,0 +1,488 @@
+// Land-shipping multi-tenant SaaS — PostgreSQL, with real `prisma migrate` history in
+// prisma/migrations/. No native enums — status fields are String, validated in TS via zod unions
+// (see src/lib/enums.ts); kept that way even post-Postgres-migration since it was never a SQLite
+// workaround, just a deliberately portable modeling choice.
+//
+// Local development also runs against PostgreSQL now, not SQLite. This wasn't required by the
+// Decimal money-type change (verified empirically that bare `Decimal`, without a `@db.Decimal(p,s)`
+// native-type attribute, round-trips with exact precision on SQLite too) — it's required because
+// Prisma's *migration system* is provider-locked: a committed prisma/migrations/ history is
+// generated as one connector's SQL dialect (Postgres's, here) and cannot be applied to a SQLite
+// database, or vice versa. Once real migration history became a requirement, one schema could no
+// longer serve both. Developer workflow: run PostgreSQL locally (native install or Docker), point
+// DATABASE_URL at it, `npx prisma migrate dev` for schema changes, `npm run db:seed` unchanged.
+//
+// Money fields use plain `Decimal` (no `@db.Decimal(p,s)` native-type attribute) so the type stays
+// portable if this ever needs to run against another SQL connector again. Every Decimal read that
+// reaches a page or a Client Component is converted to a plain number via src/lib/money.ts
+// (`toMoney`/`toMoneyOrNull`) at the service-layer read boundary — Prisma.Decimal instances aren't
+// serializable across the Next.js Server->Client Component boundary and have no arithmetic
+// operators or .toLocaleString().
+//
+// `directUrl` exists for managed-Postgres providers (Supabase, Neon, ...) that put a connection
+// pooler (PgBouncer, transaction mode) in front of the database. `url`/DATABASE_URL should point at
+// the pooler for the app's own runtime queries — serverless functions can otherwise open far more
+// direct Postgres connections than a small instance's max_connections allows. `directUrl`/DIRECT_URL
+// bypasses the pooler for `prisma migrate`, which needs a real session (advisory locks, DDL) that
+// PgBouncer's transaction mode doesn't support. Locally, against a plain (unpooled) Postgres
+// install, both env vars are simply the same connection string.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------- Platform / Tenancy ----------
+
+model Platform {
+  id                String   @id @default(cuid())
+  name              String   @default("منصة الشحن")
+  feePerCartonYER   Decimal  @default(5)
+  whatsappSenderName String  @default("منصة الشحن")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model Company {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  status      String   @default("ACTIVE") // ACTIVE | SUSPENDED
+  phone       String?
+  email       String?
+  logoColor   String   @default("#1e3a8a")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  branches      Branch[]
+  users         User[]
+  roles         Role[]
+  customers     Customer[]
+  shipments     Shipment[]
+  trips         Trip[]
+  customsCases  CustomsCase[]
+  documents     Document[]
+  notifTemplates NotificationTemplate[]
+  notifLogs     NotificationLog[]
+  ledgerEntries BillingLedgerEntry[]
+  invoices      Invoice[]
+  deliveryRequests DeliveryRequest[]
+  auditLogs     AuditLog[]
+  vehicles      Vehicle[]
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  city      String
+  country   String
+  status    String   @default("ACTIVE") // ACTIVE | INACTIVE
+  createdAt DateTime @default(now())
+
+  employees          User[]
+  customersHomeBranch Customer[]
+  loadShipments      Shipment[] @relation("LoadBranch")
+  unloadShipments    Shipment[] @relation("UnloadBranch")
+  currentShipments   Shipment[] @relation("CurrentBranch")
+  tripStops          TripStop[]
+
+  @@index([companyId])
+}
+
+// ---------- Users / RBAC ----------
+
+model User {
+  id           String   @id @default(cuid())
+  companyId    String?
+  company      Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branchId     String?
+  branch       Branch?  @relation(fields: [branchId], references: [id])
+  name         String
+  email        String   @unique
+  phone        String?
+  passwordHash String
+  userType     String   // PLATFORM_ADMIN | COMPANY_USER | DRIVER
+  roleId       String?
+  role         Role?    @relation(fields: [roleId], references: [id])
+  status       String   @default("ACTIVE") // ACTIVE | DISABLED
+  employeeCode String?
+  createdAt    DateTime @default(now())
+
+  driverTrips  Trip[]   @relation("DriverTrips")
+  auditLogs    AuditLog[]
+
+  @@index([companyId])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  permissions String   // JSON string: { "shipments": ["view","create",...], ... }
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  users User[]
+
+  @@index([companyId])
+}
+
+// ---------- Customers ----------
+
+model Customer {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String
+  phone         String
+  altPhone      String?
+  homeBranchId  String?
+  homeBranch    Branch?  @relation(fields: [homeBranchId], references: [id])
+  address       String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  shipments Shipment[]
+
+  @@index([companyId])
+  @@index([companyId, phone])
+}
+
+// ---------- Shipments / Cartons ----------
+
+model Shipment {
+  id                String   @id @default(cuid())
+  companyId         String
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  shipmentNumber    String   @unique
+  customerId        String
+  customer          Customer @relation(fields: [customerId], references: [id])
+  receiverName      String
+  receiverPhone     String
+  loadBranchId      String
+  loadBranch        Branch   @relation("LoadBranch", fields: [loadBranchId], references: [id])
+  unloadBranchId    String
+  unloadBranch      Branch   @relation("UnloadBranch", fields: [unloadBranchId], references: [id])
+  currentBranchId   String?
+  currentBranch     Branch?  @relation("CurrentBranch", fields: [currentBranchId], references: [id])
+  goodsType         String?
+  weightKg          Float?
+  declaredValue     Decimal?
+  notes             String?
+  status            String   @default("DRAFT")
+  totalCartons      Int      @default(0)
+  arrivedCartons    Int      @default(0)
+  deliveryMethod    String?  // PICKUP | HOME_DELIVERY
+  createdById       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Customer shipping revenue — entirely separate from the platform's per-carton ledger fee below.
+  shippingPrice        Decimal?
+  amountPaid           Decimal   @default(0)
+  paymentMethod        String?   // CASH | OTHER
+  paymentDate          DateTime?
+  paymentReceivedById  String?
+
+  // Structured exception state — lets a stuck EXCEPTION shipment be listed and resolved back to
+  // where it was, instead of the status change only being recoverable from free-text tracking notes.
+  exceptionType        String?
+  exceptionNote        String?
+  statusBeforeException String?
+
+  cartons        Carton[]
+  tripLinks      TripShipmentStop[]
+  trackingEvents TrackingEvent[]
+  customsCase    CustomsCase?
+  documents      Document[]
+  notifLogs      NotificationLog[]
+  ledgerEntries  BillingLedgerEntry[]
+  deliveryRequest DeliveryRequest?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([customerId])
+  @@index([loadBranchId])
+  @@index([unloadBranchId])
+}
+
+model Carton {
+  id           String   @id @default(cuid())
+  shipmentId   String
+  shipment     Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  cartonIndex  Int      // 1..N within the shipment
+  cartonCode   String   @unique // e.g. SH-10482-C1, used for exception lookup/QR only
+  status       String   @default("REGISTERED") // REGISTERED|LOADED|IN_TRANSIT|UNLOADED|ARRIVED|DELIVERED|MISSING|DAMAGED
+  weightKg     Float?
+  createdAt    DateTime @default(now())
+
+  @@index([shipmentId])
+}
+
+// ---------- Trips / Stops ----------
+
+// Minimal vehicle identity — just enough to identify and assign the physical vehicle used by a
+// trip, mirroring how a driver is already a real relation (Trip.driverId) rather than free text.
+// Deliberately not a fleet-management entity: no maintenance/insurance/licensing/fuel/GPS fields.
+model Vehicle {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plateNumber String
+  type        String? // free-text label if the office wants one, e.g. "شاحنة كبيرة" — no taxonomy
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  trips Trip[]
+
+  @@unique([companyId, plateNumber])
+  @@index([companyId])
+}
+
+model Trip {
+  id           String   @id @default(cuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tripNumber   String   @unique
+  vehicleId    String?
+  vehicle      Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  driverId     String?
+  driver       User?    @relation("DriverTrips", fields: [driverId], references: [id])
+  status       String   @default("PLANNED") // PLANNED|IN_PROGRESS|COMPLETED|CANCELLED
+  distanceKm   Float?
+  createdAt    DateTime @default(now())
+
+  stops TripStop[]
+  shipmentLinks TripShipmentStop[]
+
+  @@index([companyId])
+  @@index([driverId])
+  @@index([vehicleId])
+}
+
+model TripStop {
+  id               String   @id @default(cuid())
+  tripId           String
+  trip             Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  branchId         String
+  branch           Branch   @relation(fields: [branchId], references: [id])
+  sequence         Int
+  loadingEnabled   Boolean  @default(false)
+  unloadingEnabled Boolean  @default(false)
+  plannedArrival   DateTime?
+  actualArrival    DateTime?
+  plannedDeparture DateTime?
+  actualDeparture  DateTime?
+  status           String   @default("PENDING") // PENDING|ARRIVED|LOADING|UNLOADING|DEPARTED|DONE
+  notes            String?
+
+  shipmentLoads   TripShipmentStop[] @relation("LoadStop")
+  shipmentUnloads TripShipmentStop[] @relation("UnloadStop")
+
+  @@index([tripId])
+  @@unique([tripId, sequence])
+}
+
+// Links a shipment to a trip with its specific load stop and unload stop —
+// lets two shipments on the same trip end at different stops without hardcoding trip origin/destination.
+model TripShipmentStop {
+  id           String   @id @default(cuid())
+  tripId       String
+  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  shipmentId   String
+  shipment     Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  loadStopId   String
+  loadStop     TripStop @relation("LoadStop", fields: [loadStopId], references: [id])
+  unloadStopId String
+  unloadStop   TripStop @relation("UnloadStop", fields: [unloadStopId], references: [id])
+  loadedAt     DateTime?
+  unloadedAt   DateTime?
+  cartonsLoaded   Int   @default(0)
+  cartonsUnloaded Int   @default(0)
+
+  @@index([tripId])
+  @@index([shipmentId])
+  @@unique([tripId, shipmentId])
+}
+
+// ---------- Tracking ----------
+
+model TrackingEvent {
+  id          String   @id @default(cuid())
+  shipmentId  String
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  eventType   String   // maps to shipment status transitions + custom events
+  title       String
+  description String?
+  branchName  String?
+  isCustomerVisible Boolean @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([shipmentId])
+}
+
+// ---------- Customs / Documents ----------
+
+model CustomsCase {
+  id             String   @id @default(cuid())
+  companyId      String
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  shipmentId     String   @unique
+  shipment       Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  status         String   @default("NOT_PREPARED")
+  declaredValue  Decimal?
+  contents       String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  documents Document[]
+
+  @@index([companyId])
+}
+
+model Document {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  shipmentId    String?
+  shipment      Shipment? @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  customsCaseId String?
+  customsCase   CustomsCase? @relation(fields: [customsCaseId], references: [id], onDelete: Cascade)
+  docType       String   // INVOICE|CUSTOMS_DECLARATION|ID|OTHER
+  fileName      String
+  filePath      String
+  uploadedById  String?
+  uploadedAt    DateTime @default(now())
+
+  @@index([companyId])
+}
+
+// ---------- Notifications ----------
+
+model NotificationTemplate {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  event     String   // ShipmentEvent key
+  channel   String   @default("WHATSAPP")
+  body      String
+  isActive  Boolean  @default(true)
+
+  @@index([companyId])
+  @@unique([companyId, event, channel])
+}
+
+model NotificationLog {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  shipmentId String?
+  shipment   Shipment? @relation(fields: [shipmentId], references: [id])
+  event      String
+  channel    String   @default("WHATSAPP")
+  toPhone    String
+  message    String
+  status     String   @default("PENDING") // PENDING|SENT|FAILED|SKIPPED
+  providerMessageId String? // e.g. Meta's wamid, for reconciling delivery-status webhooks
+  providerError     String? // set on FAILED — provider's own error message, never a raw token/secret
+
+  // The id of the TrackingEvent that triggered this dispatch attempt. A real transition creates
+  // exactly one TrackingEvent (state-machine-guarded — see assertTransition), so this doubles as
+  // the idempotency key: a retried dispatch for the same underlying occurrence hits the unique
+  // constraint and is skipped instead of sending a second WhatsApp message. Null for notifications
+  // not tied to a single tracking event (none exist yet, but the column isn't event-specific).
+  trackingEventId String? @unique
+
+  createdAt  DateTime @default(now())
+
+  @@index([companyId])
+  @@index([shipmentId])
+}
+
+// ---------- Billing ----------
+
+model BillingLedgerEntry {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  shipmentId  String?
+  shipment    Shipment? @relation(fields: [shipmentId], references: [id])
+  cartonCount Int
+  feePerCarton Decimal
+  amount      Decimal
+  entryType   String   @default("CARTON_FEE") // CARTON_FEE|ADJUSTMENT|SETTLEMENT
+  note        String?
+  invoiceId   String?
+  invoice     Invoice? @relation(fields: [invoiceId], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([companyId])
+  @@index([invoiceId])
+  @@index([shipmentId])
+}
+
+model Invoice {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoiceNumber String @unique
+  periodStart DateTime
+  periodEnd   DateTime
+  totalAmount Decimal
+  status      String   @default("UNPAID") // UNPAID|PAID|CANCELLED
+  createdAt   DateTime @default(now())
+
+  entries BillingLedgerEntry[]
+
+  @@index([companyId])
+}
+
+// ---------- Delivery (Arshi) ----------
+
+model DeliveryRequest {
+  id             String   @id @default(cuid())
+  companyId      String
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  shipmentId     String   @unique
+  shipment       Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  customerName   String
+  customerPhone  String
+  pickupBranchId String
+  destinationAddress String
+  cartonCount    Int
+  deliveryFee    Decimal  @default(0)
+  notes          String?
+  status         String   @default("PENDING") // PENDING|ASSIGNED|OUT_FOR_DELIVERY|DELIVERED|FAILED|CANCELLED
+  providerName   String   @default("ARSHI")
+  providerRef    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+// ---------- Audit ----------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  companyId  String?
+  company    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  entityType String
+  entityId   String?
+  metadata   String?
+  createdAt  DateTime @default(now())
+
+  @@index([companyId])
+}
