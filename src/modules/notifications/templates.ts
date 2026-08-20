@@ -141,10 +141,23 @@ export const META_TEMPLATES: Partial<
     language: "ar_AE",
     buildParams: (v) => [v.companyName, v.recipientName, v.shipmentNumber, v.branchName, String(v.totalCartons), v.trackingUrl],
   },
+  // Six parameters: the branch name is {{6}}, appended rather than inserted so the five already
+  // agreed positions keep their meaning. A short arrival is the most dispute-prone event in this
+  // product, and the message used to tell the receiver that cartons were missing without telling
+  // them which branch is holding the ones that did arrive — the default Arabic body (above) has
+  // always named the branch, so this also stops the sent message and the office's own log from
+  // describing the same event differently.
   SHIPMENT_PARTIALLY_ARRIVED: {
     name: "shipment_partial_arrival",
     language: "ar_AE",
-    buildParams: (v) => [v.companyName, v.recipientName, v.shipmentNumber, String(v.totalCartons), String(v.arrivedCartons)],
+    buildParams: (v) => [
+      v.companyName,
+      v.recipientName,
+      v.shipmentNumber,
+      String(v.totalCartons),
+      String(v.arrivedCartons),
+      v.branchName,
+    ],
   },
   DELIVERY_REQUESTED: {
     name: "delivery_requested",
