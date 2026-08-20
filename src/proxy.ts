@@ -16,7 +16,10 @@ async function readSession(req: NextRequest) {
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const isPublic = pathname.startsWith("/track") || pathname === "/login" || pathname.startsWith("/api");
+  // /reset/<token> is public by necessity: the whole reason someone opens it is that they cannot
+  // sign in. The token in the URL is the only credential, re-checked server-side on every submit.
+  const isPublic =
+    pathname.startsWith("/track") || pathname.startsWith("/reset") || pathname === "/login" || pathname.startsWith("/api");
 
   const session = await readSession(req);
 
@@ -40,10 +43,14 @@ export async function proxy(req: NextRequest) {
   const bypassToken = process.env.RATE_LIMIT_BYPASS_TOKEN;
   const isBypassed = Boolean(bypassToken) && req.headers.get("x-rate-limit-bypass") === bypassToken;
 
-  if ((pathname === "/login" || pathname.startsWith("/track")) && !isBypassed) {
+  // /reset is throttled with /login's tighter budget, not /track's: a reset token is a credential
+  // that sets a password, so the request pattern to guard against is guessing, not browsing.
+  const throttled = pathname === "/login" || pathname.startsWith("/track") || pathname.startsWith("/reset");
+  if (throttled && !isBypassed) {
     const ip = clientIpFrom(req.headers);
-    const limit = pathname === "/login" ? { max: 10, windowMs: 5 * 60 * 1000 } : { max: 30, windowMs: 5 * 60 * 1000 };
-    const allowed = await checkRateLimit(`${pathname.startsWith("/login") ? "login" : "track"}:${ip}`, limit);
+    const bucket = pathname.startsWith("/track") ? "track" : pathname.startsWith("/reset") ? "reset" : "login";
+    const limit = bucket === "track" ? { max: 30, windowMs: 5 * 60 * 1000 } : { max: 10, windowMs: 5 * 60 * 1000 };
+    const allowed = await checkRateLimit(`${bucket}:${ip}`, limit);
     if (!allowed) {
       return new NextResponse("Too many requests — try again shortly.", { status: 429 });
     }

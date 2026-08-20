@@ -44,7 +44,7 @@ test.describe("Real Meta WhatsApp integration smoke test (explicit opt-in only)"
       languageCode: template.language,
       params: template.buildParams({
         companyName: "شركة اختبار الدخان",
-        customerName: "عميل اختبار",
+        recipientName: "عميل اختبار",
         shipmentNumber: "SH-SMOKE-TEST",
         branchName: "فرع الاختبار",
         totalCartons: 1,

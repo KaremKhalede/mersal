@@ -47,7 +47,10 @@ test.describe("Scenario B — partial arrival", () => {
     await page.waitForURL(/report-problem/);
     await page.locator('button[role="combobox"]').first().click();
     await page.locator(`[role="option"]:has-text("${shipment.shipmentNumber}")`).click();
-    await page.fill("#arrivedCartons", "3");
+    // Name the two cartons that did not arrive instead of typing "3 of 5" — the count is derived
+    // from the identities now, not the other way round.
+    await page.getByTestId(`report-carton-${shipment.shipmentNumber}-C4`).click();
+    await page.getByTestId(`report-carton-${shipment.shipmentNumber}-C5`).click();
     await page.click('button:has-text("إرسال البلاغ")');
     // Careful: `/driver/trip/` also matches this very page's own URL (.../report-problem), so a
     // loose regex here would resolve immediately without ever waiting for the redirect back.
@@ -64,7 +67,7 @@ test.describe("Scenario B — partial arrival", () => {
 
     // Customer tracking communicates the partial count in plain language
     const trackPage = await page.context().newPage();
-    await trackPage.goto(`/track/${shipment.shipmentNumber}`);
+    await trackPage.goto(`/track/${shipment.trackingToken}`);
     await expect(trackPage.locator("text=وصل 3 من أصل 5")).toBeVisible();
     await trackPage.close();
 
@@ -72,8 +75,8 @@ test.describe("Scenario B — partial arrival", () => {
     const adminPage = await page.context().newPage();
     await login(adminPage, tenant.adminEmail);
     await adminPage.goto(`/app/shipments/${shipment.id}`);
-    adminPage.once("dialog", (d) => d.accept()); // this action asks for confirmation first
     await adminPage.click('button:has-text("تأكيد وصول الباقي")');
+    await adminPage.click('[role="dialog"] button:has-text("تأكيد")');
     dbShipment = await pollUntil(
       () => prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } }),
       (s) => s.status === "ARRIVED"

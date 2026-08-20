@@ -4,6 +4,7 @@ import { listDocuments } from "@/modules/documents/service";
 import { prisma } from "@/lib/db";
 import { getBranchScope } from "@/lib/branch-scope";
 import { DOCUMENT_TYPE_LABELS, type DocumentType } from "@/lib/enums";
+import { formatBusinessDate } from "@/lib/timezone";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import Link from "next/link";
@@ -38,7 +39,7 @@ export default async function DocumentsPage() {
                   <TableCell>
                     {d.shipmentId ? <Link href={`/app/shipments/${d.shipmentId}`} className="text-primary hover:underline">{shipmentMap.get(d.shipmentId)}</Link> : "—"}
                   </TableCell>
-                  <TableCell>{new Date(d.uploadedAt).toLocaleDateString("ar-SA")}</TableCell>
+                  <TableCell className="tabular-nums" dir="ltr">{formatBusinessDate(d.uploadedAt)}</TableCell>
                 </TableRow>
               ))}
               {documents.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-8">لا توجد مستندات</TableCell></TableRow>}

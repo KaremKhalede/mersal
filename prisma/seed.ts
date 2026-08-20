@@ -2,12 +2,83 @@ import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { FULL_PERMISSIONS } from "../src/lib/enums";
 import { resolveDatabaseUrl } from "../src/lib/db-url";
+import { newTrackingToken } from "../src/lib/tracking";
+import { nextShipmentNumber } from "../src/lib/ids";
 
 const prisma = new PrismaClient({ datasourceUrl: resolveDatabaseUrl(process.env.DATABASE_URL) });
 const PASSWORD = "Passw0rd!";
 
+/**
+ * The demo tenants this script owns, end to end. Nothing outside this list is ever touched — in
+ * particular the platform row, the platform admin accounts, the migration-seeded PlatformRoles, and
+ * every other company in the database (e.g. Playwright's throwaway `test-co-*` tenants) are left
+ * exactly as they are.
+ */
+const companiesData = [
+  { name: "مؤسسة النور للشحن", slug: "alnoor", cities: ["الرياض", "جدة", "المكلا", "سيئون"] },
+  { name: "شركة الأمان للشحن", slug: "alaman", cities: ["الرياض", "عدن"] },
+  { name: "شركة المسار للشحن", slug: "almasar", cities: ["جدة", "تعز"] },
+  { name: "الشركة اليمنية للنقل", slug: "yemenia-transport", cities: ["الرياض", "صنعاء"] },
+  { name: "مؤسسة الخليج للشحن", slug: "algulf", cities: ["الدمام", "المكلا"] },
+];
+const DEMO_SLUGS = companiesData.map((c) => c.slug);
+
+/**
+ * Makes re-running the seed idempotent.
+ *
+ * Most rows here have no natural unique key to upsert on — a Branch is only (companyId, name), a
+ * Customer only (companyId, phone), and a demo Shipment/Trip has nothing but its generated number.
+ * So every re-run appended a second set of branches and customers, and then died outright on
+ * `Trip.tripNumber` / `Shipment.shipmentNumber`, both of which are globally @unique — leaving the
+ * database in a half-seeded state that got worse with each attempt.
+ *
+ * Rather than inventing unique constraints purely to serve demo data, the seed simply owns its five
+ * demo tenants: drop them, rebuild them. Company has onDelete: Cascade to branches, users, roles,
+ * customers, shipments, trips, ledger entries, invoices and the rest, so one delete per slug clears
+ * the whole subtree with no manual ordering.
+ */
+async function resetDemoCompanies() {
+  const demo = await prisma.company.findMany({ where: { slug: { in: DEMO_SLUGS } }, select: { id: true } });
+  if (demo.length === 0) return;
+  const companyId = { in: demo.map((c) => c.id) };
+
+  // Trips and shipments first, then the companies. Company -> Branch is onDelete: Cascade, but
+  // TripStop.branchId and Shipment.loadBranchId/unloadBranchId/currentBranchId are required
+  // relations with no onDelete, i.e. RESTRICT — Postgres aborts the whole cascade when it reaches
+  // a Branch those rows still point at. Clearing them up front lets the cascade run to completion.
+  await prisma.trip.deleteMany({ where: { companyId } });
+  await prisma.shipment.deleteMany({ where: { companyId } });
+  const { count } = await prisma.company.deleteMany({ where: { id: companyId } });
+  console.log(`Reset ${count} existing demo company/companies (cascade).`);
+}
+
+/** The super-admin PlatformRole, created if a fresh database somehow lacks it. Every platform
+ *  account needs a role now — without one, canPlatform() correctly grants nothing. */
+async function ensureSuperAdminRole() {
+  const existing = await prisma.platformRole.findFirst({ where: { isSuperAdmin: true } });
+  if (existing) return existing;
+  return prisma.platformRole.create({
+    data: {
+      name: "مدير المنصة",
+      description: "صلاحية كاملة على لوحة إدارة المنصة",
+      permissions: "{}",
+      isSuperAdmin: true,
+      isSystem: true,
+    },
+  });
+}
+
 async function main() {
+  // This script creates demo companies and demo accounts that all share one hard-coded password.
+  // prisma/bootstrap.ts is the only thing meant to touch a production database (see its docstring);
+  // this guard makes running the wrong one an error rather than a data-loss incident, now that the
+  // seed resets its own demo tenants.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Refusing to seed: NODE_ENV=production. Use prisma/bootstrap.ts instead.");
+  }
+
   console.log("Seeding...");
+  await resetDemoCompanies();
   await prisma.platform.upsert({
     where: { id: "platform-1" },
     update: {},
@@ -24,17 +95,10 @@ async function main() {
       email: "admin@platform.dev",
       passwordHash,
       userType: "PLATFORM_ADMIN",
+      platformRoleId: (await ensureSuperAdminRole()).id,
     },
   });
   console.log("Platform admin:", platformAdmin.email);
-
-  const companiesData = [
-    { name: "مؤسسة النور للشحن", slug: "alnoor", cities: ["الرياض", "جدة", "المكلا", "سيئون"] },
-    { name: "شركة الأمان للشحن", slug: "alaman", cities: ["الرياض", "عدن"] },
-    { name: "شركة المسار للشحن", slug: "almasar", cities: ["جدة", "تعز"] },
-    { name: "الشركة اليمنية للنقل", slug: "yemenia-transport", cities: ["الرياض", "صنعاء"] },
-    { name: "مؤسسة الخليج للشحن", slug: "algulf", cities: ["الدمام", "المكلا"] },
-  ];
 
   const branchCityMeta: Record<string, { country: string }> = {
     الرياض: { country: "السعودية" },
@@ -60,8 +124,13 @@ async function main() {
       create: { name: c.name, slug: c.slug, phone: "0500000000", email: `info@${c.slug}.example` },
     });
 
-    const adminRole = await prisma.role.create({
-      data: {
+    // Roles are upserted on (companyId, name) — seed.ts is re-run against the same demo companies
+    // routinely (`npm run db:seed`), and `prisma.role.create` here used to insert a fresh duplicate
+    // row every single run. Keyed upsert makes re-running idempotent instead.
+    const adminRole = await prisma.role.upsert({
+      where: { companyId_name: { companyId: company.id, name: "مدير الشركة" } },
+      update: {},
+      create: {
         companyId: company.id,
         name: "مدير الشركة",
         description: "صلاحية كاملة على الشركة",
@@ -70,8 +139,10 @@ async function main() {
       },
     });
 
-    const opsRole = await prisma.role.create({
-      data: {
+    const opsRole = await prisma.role.upsert({
+      where: { companyId_name: { companyId: company.id, name: "مدير عمليات" } },
+      update: {},
+      create: {
         companyId: company.id,
         name: "مدير عمليات",
         description: "الشحنات والرحلات والفروع",
@@ -85,8 +156,10 @@ async function main() {
       },
     });
 
-    const branchRole = await prisma.role.create({
-      data: {
+    const branchRole = await prisma.role.upsert({
+      where: { companyId_name: { companyId: company.id, name: "موظف فرع" } },
+      update: {},
+      create: {
         companyId: company.id,
         name: "موظف فرع",
         description: "استلام وتحميل وتفريغ واستلام العملاء",
@@ -177,7 +250,11 @@ async function main() {
       demoBranches = branchIds;
 
       // Realistic multi-stop demo trip: Riyadh -> Seiyun -> Mukalla (TR-2045 style)
-      const demoVehicle = await prisma.vehicle.create({ data: { companyId: company.id, plateNumber: "ب ج د 1234" } });
+      const demoVehicle = await prisma.vehicle.upsert({
+        where: { companyId_plateNumber: { companyId: company.id, plateNumber: "ب ج د 1234" } },
+        update: {},
+        create: { companyId: company.id, plateNumber: "ب ج د 1234", type: "TRUCK" },
+      });
       const trip = await prisma.trip.create({
         data: {
           companyId: company.id,
@@ -205,6 +282,7 @@ async function main() {
         data: {
           companyId: company.id,
           shipmentNumber: "SH-10482",
+          trackingToken: newTrackingToken(),
           customerId: customers[0].id,
           receiverName: "علي محمد",
           receiverPhone: "+967777123456",
@@ -373,15 +451,20 @@ async function main() {
   console.log("Demo public tracking shipment number:", demoShipmentNumber);
 }
 
+/** Demo shipments draw from the same database sequence the application uses (src/lib/ids.ts),
+ *  so there is exactly one allocator and seeded rows can never collide with real ones. The seed's
+ *  own PrismaClient is passed in rather than the app's shared singleton, to avoid opening a second
+ *  connection from a script. */
 async function createShipmentSeed(
   db: PrismaClient,
   params: { companyId: string; customerId: string; receiverName: string; receiverPhone: string; loadBranchId: string; unloadBranchId: string; cartons: number; goodsType?: string; weightKg?: number }
 ) {
-  const shipmentNumber = "SH-" + Math.floor(10000 + Math.random() * 89999);
+  const shipmentNumber = await nextShipmentNumber(db);
   const shipment = await db.shipment.create({
     data: {
       companyId: params.companyId,
       shipmentNumber,
+      trackingToken: newTrackingToken(),
       customerId: params.customerId,
       receiverName: params.receiverName,
       receiverPhone: params.receiverPhone,

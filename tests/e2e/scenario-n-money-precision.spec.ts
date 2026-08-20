@@ -14,7 +14,7 @@ test.describe("Scenario N — money is exact decimal, never floating point", () 
 
     await login(page, tenant.adminEmail);
     await page.goto(`/app/shipments/${shipment.id}`);
-    await expect(page.locator("text=45000 ر.ي").first()).toBeVisible();
+    await expect(page.locator("text=45,000 ر.ي").first()).toBeVisible();
     await expect(page.locator("text=0 ر.ي").first()).toBeVisible(); // remaining
 
     const db = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
@@ -47,7 +47,7 @@ test.describe("Scenario N — money is exact decimal, never floating point", () 
     expect(Number(db.amountPaid)).toBe(12500);
     const remaining = Number(db.shippingPrice) - Number(db.amountPaid);
     expect(remaining).toBe(17500);
-    await expect(page.locator("text=17500 ر.ي").first()).toBeVisible();
+    await expect(page.locator("text=17,500 ر.ي").first()).toBeVisible();
 
     await cleanupTenant(tenant.company.id);
   });
@@ -88,7 +88,7 @@ test.describe("Scenario N — money is exact decimal, never floating point", () 
 
     await login(page, tenant.adminEmail);
     await page.goto(`/app/shipments/${shipment.id}`);
-    await expect(page.locator("text=8000 ر.ي").first()).toBeVisible();
+    await expect(page.locator("text=8,000 ر.ي").first()).toBeVisible();
 
     await cleanupTenant(tenant.company.id);
   });

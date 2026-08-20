@@ -30,7 +30,9 @@ test.describe("Scenario A — normal shipment lifecycle", () => {
     await page.getByTestId("new-trip-stop-1").locator('button[role="combobox"]').click();
     await page.locator(`[role="option"]:has-text("${unloadBranch.name}")`).click();
     await page.click('button:has-text("إنشاء الرحلة")');
-    await page.waitForURL(/\/app\/trips\//);
+    // Not just /\/app\/trips\// — that also matches the /app/trips/new form page itself, which
+    // the client-side navigation to it lands on well before the real trip (and its real id) exist.
+    await page.waitForURL(/\/app\/trips\/(?!new)[a-z0-9]+$/);
 
     const tripUrl = page.url();
     const tripId = tripUrl.split("/trips/")[1];
@@ -41,9 +43,9 @@ test.describe("Scenario A — normal shipment lifecycle", () => {
     const stop2Card = page.getByTestId(`stop-${stop2.id}`);
 
     // 3. Assign the shipment to the trip's loading stop
-    await stop1Card.locator('button:has-text("ربط شحنة")').click();
+    await stop1Card.locator('button:has-text("اقتراح الشحنات")').click();
     await page.locator(`[role="dialog"] label:has-text("${shipment.shipmentNumber}")`).click();
-    await page.click('[role="dialog"] button:has-text("ربط")');
+    await page.click('[role="dialog"] button:has-text("إضافة")');
     await expect(stop1Card.locator(`text=${shipment.shipmentNumber}`)).toBeVisible();
 
     // 4. Confirm bulk loading at stop 1
@@ -65,6 +67,10 @@ test.describe("Scenario A — normal shipment lifecycle", () => {
     // 6. Confirm bulk unloading at stop 2 -> ARRIVED
     await page.goto(tripUrl);
     await stop2Card.locator('button:has-text("تأكيد التفريغ")').click();
+    // Unload is a dialog now (P1-5): every carton starts as arrived, so confirming without touching
+    // anything is the "all of it came off" case.
+    await page.click('[role="dialog"] button:has-text("تأكيد التفريغ")');
+
     dbShipment = await pollUntil(
       () => prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } }),
       (s) => s.status === "ARRIVED"
@@ -77,8 +83,11 @@ test.describe("Scenario A — normal shipment lifecycle", () => {
     await page.click('button:has-text("وضع جاهزة للاستلام")');
     await expect(page.locator("text=جاهزة للاستلام").first()).toBeVisible();
 
-    page.once("dialog", (d) => d.accept());
     await page.click('button:has-text("تسليم من الفرع")');
+    // Handover now records who took the cartons (P1-2): the dialog asks for a name and the last 4
+    // digits of the receiver's number before the shipment may reach DELIVERED.
+    await page.fill('[role="dialog"] input[name="last4"]', "0000");
+    await page.click('[role="dialog"] button:has-text("تأكيد التسليم")');
     dbShipment = await pollUntil(
       () => prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } }),
       (s) => s.status === "DELIVERED"
@@ -87,7 +96,7 @@ test.describe("Scenario A — normal shipment lifecycle", () => {
 
     // 8. Public tracking page reflects the final state without any auth
     const trackPage = await page.context().newPage();
-    await trackPage.goto(`/track/${shipment.shipmentNumber}`);
+    await trackPage.goto(`/track/${shipment.trackingToken}`);
     await expect(trackPage.locator("text=تم التسليم").first()).toBeVisible();
     await trackPage.close();
 

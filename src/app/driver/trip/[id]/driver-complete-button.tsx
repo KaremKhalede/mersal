@@ -17,14 +17,11 @@ export function DriverCompleteButton({ tripId, disabled }: { tripId: string; dis
       disabled={disabled || pending}
       onClick={() =>
         startTransition(async () => {
-          try {
-            await driverCompleteTripAction(tripId);
-            router.refresh();
-            toast.success("تم إنهاء الرحلة بنجاح");
-            router.push("/driver");
-          } catch (e) {
-            toast.error(e instanceof Error ? e.message : "تعذّر إنهاء الرحلة");
-          }
+          const r = await driverCompleteTripAction(tripId);
+          if (r?.error) { toast.error(r.error); return; }
+          router.refresh();
+          toast.success("تم إنهاء الرحلة بنجاح");
+          router.push("/driver");
         })
       }
     >

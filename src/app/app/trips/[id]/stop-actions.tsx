@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PackageCheck, PackageOpen, ArrowLeftCircle } from "lucide-react";
+import { UnloadDialog, type UnloadShipment } from "@/components/shell/unload-dialog";
 import { confirmLoadAction, confirmUnloadAction, departStopAction } from "../actions";
 
 export function StopActions({
@@ -14,6 +15,7 @@ export function StopActions({
   unloadingEnabled,
   pendingLoad,
   pendingUnload,
+  unloadShipments,
   stopStatus,
 }: {
   tripId: string;
@@ -22,6 +24,7 @@ export function StopActions({
   unloadingEnabled: boolean;
   pendingLoad: number;
   pendingUnload: number;
+  unloadShipments: UnloadShipment[];
   stopStatus: string;
 }) {
   const [pending, startTransition] = useTransition();
@@ -30,21 +33,14 @@ export function StopActions({
 
   return (
     <div className="flex flex-wrap gap-2">
+      {/* A dialog now, not a one-click confirm: "all of it arrived" is a claim, and the only place
+          the employee can say otherwise is the moment they are looking at the pile. */}
       {unloadingEnabled && pendingUnload > 0 && (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={pending}
-          onClick={() =>
-            startTransition(async () => {
-              const r = await confirmUnloadAction(tripId, stopId);
-              router.refresh();
-              toast.success(`تم تفريغ ${r.shipmentsUnloaded} شحنة (${r.cartonsUnloaded} كرتون)`);
-            })
-          }
-        >
-          <PackageOpen className="h-4 w-4" /> تأكيد التفريغ ({pendingUnload})
-        </Button>
+        <UnloadDialog
+          trigger={<Button size="sm" variant="outline"><PackageOpen className="h-4 w-4" /> تأكيد التفريغ ({pendingUnload})</Button>}
+          shipments={unloadShipments}
+          action={(formData) => confirmUnloadAction(tripId, stopId, formData)}
+        />
       )}
       {loadingEnabled && pendingLoad > 0 && (
         <Button

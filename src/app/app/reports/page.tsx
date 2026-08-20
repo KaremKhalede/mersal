@@ -1,69 +1,84 @@
 import { requireCompanyUser } from "@/lib/auth";
 import { requireCan } from "@/lib/rbac";
-import { companyDashboard, branchPerformance } from "@/modules/reports/service";
-import { billingSummary } from "@/modules/billing/service";
+import { periodReport } from "@/modules/reports/service";
+import { listBranches } from "@/modules/branches/service";
+import { getBranchScope } from "@/lib/branch-scope";
 import { StatCard } from "@/components/ui/stat-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Package, Boxes, Wallet, AlertTriangle } from "lucide-react";
-import { SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/enums";
+import { Package, Boxes, CheckCircle2 } from "lucide-react";
+import { ReportFilters, ChartBranchFilter } from "./filters";
+import { ExportReportButton } from "./export-report-button";
+import { StatusDonut } from "./status-donut";
+import { ActivityChart } from "./activity-chart";
+import { TopEntitiesTable } from "./top-entities-table";
 
-export default async function ReportsPage() {
+function toDateInputValue(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+export default async function ReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string; branchId?: string; destinationId?: string }>;
+}) {
   const user = await requireCompanyUser();
   requireCan(user, "reports", "view");
-  const [dashboard, branches, billing] = await Promise.all([
-    companyDashboard(user.companyId!),
-    branchPerformance(user.companyId!),
-    billingSummary(user.companyId!),
+  const sp = await searchParams;
+  const ownScope = getBranchScope(user);
+
+  const now = new Date();
+  const defaultFrom = toDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1));
+  const defaultTo = toDateInputValue(now);
+  const fromStr = sp.from || defaultFrom;
+  const toStr = sp.to || defaultTo;
+
+  const [report, branches] = await Promise.all([
+    periodReport(user.companyId!, {
+      from: new Date(`${fromStr}T00:00:00`),
+      to: new Date(`${toStr}T23:59:59`),
+      branchId: sp.branchId,
+      destinationId: sp.destinationId,
+      branchScope: ownScope,
+    }),
+    listBranches(user.companyId!),
   ]);
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">التقارير</h2>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="إجمالي الشحنات" value={dashboard.total} icon={Package} />
-        <StatCard label="إجمالي الكراتين" value={dashboard.cartons} icon={Boxes} />
-        <StatCard label="إجمالي رسوم المنصة" value={`${billing.totalAmount.toLocaleString()} ر.ي`} icon={Wallet} tone="success" />
-        <StatCard label="استثناءات" value={dashboard.exceptions} icon={AlertTriangle} tone="destructive" />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold">التقارير</h2>
+          <p className="text-sm text-muted-foreground">تحليل أداء الشحنات والإيرادات خلال الفترة المحددة</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <ReportFilters branches={branches} from={fromStr} to={toStr} branchId={sp.branchId} destinationId={sp.destinationId} />
+          <ExportReportButton defaultFrom={defaultFrom} defaultTo={defaultTo} />
+        </div>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader><CardTitle className="text-base">الشحنات حسب الحالة</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {dashboard.byStatus.sort((a, b) => b._count - a._count).map((row) => (
-              <div key={row.status} className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">{SHIPMENT_STATUS_LABELS[row.status as ShipmentStatus] ?? row.status}</span>
-                <span className="font-semibold">{row._count}</span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard variant="icon-start" label="تم التسليم" value={report.delivered.toLocaleString()} icon={CheckCircle2} tone="primary" />
+        <StatCard variant="icon-start" label="إجمالي الكراتين" value={report.cartons.toLocaleString()} icon={Boxes} tone="success" />
+        <StatCard variant="icon-start" label="إجمالي الشحنات" value={report.total.toLocaleString()} icon={Package} tone="info" />
+      </div>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">أداء الفروع</CardTitle></CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>الفرع</TableHead>
-                  <TableHead>شحنات محمّلة منه</TableHead>
-                  <TableHead>شحنات مفرّغة فيه</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {branches.map((b) => (
-                  <TableRow key={b.branch.id}>
-                    <TableCell className="font-medium">{b.branch.name}</TableCell>
-                    <TableCell>{b.loaded}</TableCell>
-                    <TableCell>{b.unloaded}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="rounded-xl border bg-card p-4">
+          <h3 className="mb-4 font-heading text-base font-medium">حالة الشحنات</h3>
+          <StatusDonut total={report.total} segments={report.byStatus} />
+        </div>
+
+        <div className="rounded-xl border bg-card p-4">
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <h3 className="font-heading text-base font-medium">نشاط الشحنات خلال الفترة</h3>
+            <ChartBranchFilter branches={branches} branchId={sp.branchId} />
+          </div>
+          <ActivityChart data={report.dailyActivity} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <TopEntitiesTable title="أكثر الفروع نشاطاً" rows={report.topBranches} tone="success" moreHref="/app/branches" moreLabel="عرض جميع الفروع" />
+        <TopEntitiesTable title="أكثر الوجهات نشاطاً" rows={report.topDestinations} tone="primary" moreHref="/app/branches" moreLabel="عرض جميع الوجهات" />
       </div>
     </div>
   );

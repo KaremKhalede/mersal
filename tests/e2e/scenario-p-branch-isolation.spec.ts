@@ -9,6 +9,7 @@ import {
   login,
   cleanupTenant,
   TEST_PASSWORD,
+  expectNotFound,
 } from "./helpers";
 
 test.describe("Scenario P — branch-level data access (Phase 5 P0)", () => {
@@ -62,9 +63,9 @@ test.describe("Scenario P — branch-level data access (Phase 5 P0)", () => {
     await expect(page.locator(`text=${shipmentAtA.shipmentNumber}`)).toBeVisible();
     await expect(page.locator(`text=${shipmentAtB.shipmentNumber}`)).toHaveCount(0);
 
-    // Shipment detail: direct URL to the out-of-branch shipment must 404, not leak data
-    const res = await page.goto(`/app/shipments/${shipmentAtB.id}`);
-    expect(res?.status()).toBe(404);
+    // Shipment detail: a direct URL to the out-of-branch shipment must refuse and leak nothing.
+    await page.goto(`/app/shipments/${shipmentAtB.id}`);
+    await expectNotFound(page, [shipmentAtB.shipmentNumber]);
     await page.goto(`/app/shipments/${shipmentAtA.id}`);
     await expect(page.locator(`text=${shipmentAtA.shipmentNumber}`)).toBeVisible();
 
@@ -72,8 +73,8 @@ test.describe("Scenario P — branch-level data access (Phase 5 P0)", () => {
     await page.goto("/app/trips");
     await expect(page.locator(`text=${tripAtA.tripNumber}`)).toBeVisible();
     await expect(page.locator(`text=${tripAtB.tripNumber}`)).toHaveCount(0);
-    const tripRes = await page.goto(`/app/trips/${tripAtB.id}`);
-    expect(tripRes?.status()).toBe(404);
+    await page.goto(`/app/trips/${tripAtB.id}`);
+    await expectNotFound(page, [tripAtB.tripNumber]);
 
     // Customers: home-branch-A customer visible, home-branch-B customer is not
     await page.goto("/app/customers");
@@ -175,9 +176,9 @@ test.describe("Scenario P — branch-level data access (Phase 5 P0)", () => {
     await expect(page.locator(`text=${myTrip.tripNumber}`)).toBeVisible();
     await expect(page.locator(`text=${otherTrip.tripNumber}`)).toHaveCount(0);
 
-    // Direct URL to the other driver's trip must 404, not render their manifest.
-    const res = await page.goto(`/driver/trip/${otherTrip.id}`);
-    expect(res?.status()).toBe(404);
+    // Direct URL to the other driver's trip must refuse, not render their manifest.
+    await page.goto(`/driver/trip/${otherTrip.id}`);
+    await expectNotFound(page, [otherTrip.tripNumber]);
 
     // Their own trip works normally.
     const ownRes = await page.goto(`/driver/trip/${myTrip.id}`);

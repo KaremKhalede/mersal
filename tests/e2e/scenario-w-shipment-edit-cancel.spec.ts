@@ -29,14 +29,14 @@ test.describe("Scenario W — shipment edit and cancel (DRAFT/REGISTERED only)",
 
     await page.click('button:has-text("تعديل")');
     await page.fill('input[name="receiverName"]', "مستلم جديد");
-    await page.fill('input[name="receiverPhone"]', "+967799999999");
+    await page.fill('input[name="receiverPhone"]', "+967779999999");
     await page.fill('input[name="shippingPrice"]', "1500");
     await page.click('[role="dialog"] button:has-text("حفظ التعديلات")');
     await expect(page.locator("text=مستلم جديد")).toBeVisible();
 
     const after = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
     expect(after.receiverName).toBe("مستلم جديد");
-    expect(after.receiverPhone).toBe("+967799999999");
+    expect(after.receiverPhone).toBe("+967779999999");
     expect(Number(after.shippingPrice)).toBe(1500);
     // Untouched: identity, branches, carton count/codes, status.
     expect(after.shipmentNumber).toBe(before.shipmentNumber);
@@ -57,8 +57,8 @@ test.describe("Scenario W — shipment edit and cancel (DRAFT/REGISTERED only)",
 
     await login(page, tenant.adminEmail);
     await page.goto(`/app/shipments/${shipment.id}`);
-    page.once("dialog", (dialog) => dialog.accept()); // native confirm() the cancel button raises
     await page.click('button:has-text("إلغاء")');
+    await page.click('[role="dialog"] button:has-text("تأكيد")');
 
     await expect
       .poll(async () => (await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } })).status)
@@ -143,8 +143,8 @@ test.describe("Scenario W — shipment edit and cancel (DRAFT/REGISTERED only)",
 
     await login(page, employee.email);
     await page.goto(`/app/shipments/${shipment.id}`);
-    page.once("dialog", (dialog) => dialog.accept());
     await page.click('button:has-text("إلغاء")');
+    await page.click('[role="dialog"] button:has-text("تأكيد")');
     await expect
       .poll(async () => (await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } })).status)
       .toBe("CANCELLED");

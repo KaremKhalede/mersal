@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { prisma, createTestTenant, createTestShipment, login, cleanupTenant } from "./helpers";
+import { prisma, createTestTenant, createTestShipment, createTestPlatformAdmin, login, cleanupTenant } from "./helpers";
 import { generateInvoice, recordSettlement, billingSummary, listInvoices } from "../../src/modules/billing/service";
 
 /** Phase 5 P1 batch 2, item 3 — settlement / invoice paid. */
@@ -112,24 +112,54 @@ test.describe("Scenario X — settlement records and invoice paid state", () => 
     await cleanupTenant(tenant.company.id);
   });
 
-  test("record-settlement dialog on /app/billing updates status and settled/remaining in the real UI", async ({ page }) => {
+  test("company reports a payment: it stays PENDING and the invoice does NOT move until the platform confirms", async ({ page }) => {
     const { tenant, invoice } = await setupInvoice(10); // total = 50 YER
+    const admin = await createTestPlatformAdmin();
 
+    // --- Company side: report, do not settle -------------------------------------------------
     await login(page, tenant.adminEmail);
     await page.goto("/app/billing");
-
-    const row = page.locator(`tr:has-text("${invoice.invoiceNumber}")`);
-    await row.locator('button:has-text("تسجيل تسوية")').click();
+    await page.click('button:has-text("الإبلاغ عن دفعة")');
     await page.fill('input[name="amount"]', "50");
-    await page.click('[role="dialog"] button:has-text("تسجيل")');
+    await page.fill('input[name="reference"]', "TRX-9911");
+    await page.click('[role="dialog"] button:has-text("إرسال للمراجعة")');
+
+    await expect
+      .poll(async () => prisma.paymentSubmission.count({ where: { invoiceId: invoice.id, status: "PENDING" } }))
+      .toBe(1);
+
+    // The invoice must be untouched, and no SETTLEMENT may exist yet — an unverified claim is not money.
+    const stillUnpaid = await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } });
+    expect(stillUnpaid.status).toBe("UNPAID");
+    expect(await prisma.billingLedgerEntry.count({ where: { invoiceId: invoice.id, entryType: "SETTLEMENT" } })).toBe(0);
+
+    // --- Platform side: confirm ----------------------------------------------------------------
+    await login(page, admin.email);
+    await page.goto("/platform/billing");
+    await expect(page.locator("text=دفعات بانتظار المراجعة")).toBeVisible();
+    // Scope to this test's own row — the queue is shared, so clicking the first "تأكيد" would
+    // confirm an unrelated tenant's payment.
+    await page.locator("li", { hasText: invoice.invoiceNumber }).getByRole("button", { name: "تأكيد" }).click();
 
     await expect
       .poll(async () => (await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status)
       .toBe("PAID");
-    await page.reload();
-    await expect(page.locator(`tr:has-text("${invoice.invoiceNumber}")`).locator("text=مسددة")).toBeVisible();
-    // Fully paid — no further settlement action offered.
-    await expect(page.locator(`tr:has-text("${invoice.invoiceNumber}")`).locator('button:has-text("تسجيل تسوية")')).toHaveCount(0);
+    // Confirming is what appends the real ledger row.
+    expect(await prisma.billingLedgerEntry.count({ where: { invoiceId: invoice.id, entryType: "SETTLEMENT" } })).toBe(1);
+
+    await cleanupTenant(tenant.company.id);
+    await prisma.user.delete({ where: { id: admin.userId } });
+  });
+
+  test("the company can no longer settle or issue its own invoice from /app/billing", async ({ page }) => {
+    const { tenant } = await setupInvoice(4);
+
+    await login(page, tenant.adminEmail);
+    await page.goto("/app/billing");
+
+    await expect(page.locator('button:has-text("سداد الفاتورة")')).toHaveCount(0);
+    await expect(page.locator('button:has-text("إصدار فاتورة")')).toHaveCount(0);
+    await expect(page.locator('button:has-text("الإبلاغ عن دفعة")')).toBeVisible();
 
     await cleanupTenant(tenant.company.id);
   });

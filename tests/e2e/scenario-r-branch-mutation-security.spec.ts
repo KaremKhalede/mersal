@@ -112,13 +112,13 @@ test.describe("Scenario R — branch-scoped mutation authorization (bypasses the
     await page.goto("/app/trips");
     await page.click('button:has-text("رحلة جديدة")');
     // combobox 0 is the driver select — stop selects start at index 1.
-    const stopSelects = page.locator('[role="dialog"] button[role="combobox"]');
+    const stopSelects = page.locator('button[role="combobox"]');
     // Two stops, both branch B and branch C — neither is the employee's own branch A.
     await stopSelects.nth(1).click();
     await page.locator(`[role="option"]:has-text("${branchB.name}")`).click();
     await stopSelects.nth(2).click();
     await page.locator(`[role="option"]:has-text("${branchC.name}")`).click();
-    await page.click('[role="dialog"] button:has-text("إنشاء الرحلة")');
+    await page.click('button:has-text("إنشاء الرحلة")');
 
     await expect(page.locator("text=يجب أن تتضمن الرحلة فرعك")).toBeVisible();
     const count = await prisma.trip.count({ where: { companyId: tenant.company.id } });
@@ -196,6 +196,10 @@ test.describe("Scenario R — branch-scoped mutation authorization (bypasses the
       return req;
     }
 
+    // Proof of delivery is required to close a handover now; the branch rule under test is
+    // enforced before it, so a valid proof keeps this focused on the branch check alone.
+    const PROOF = { receivedByName: "مستلم اختبار", last4: "0000" };
+
     const reqForOutForDelivery = await makeReqAtB("DELIVERY_REQUESTED", "ASSIGNED");
     await expect(markOutForDelivery(tenant.company.id, reqForOutForDelivery.id, undefined, branchA.id)).rejects.toThrow();
     expect((await prisma.deliveryRequest.findUniqueOrThrow({ where: { id: reqForOutForDelivery.id } })).status).toBe("ASSIGNED");
@@ -203,10 +207,10 @@ test.describe("Scenario R — branch-scoped mutation authorization (bypasses the
     await expect(markOutForDelivery(tenant.company.id, reqForOutForDelivery.id, undefined, branchB.id)).resolves.toBeTruthy();
 
     const reqForDelivered = await makeReqAtB("OUT_FOR_DELIVERY", "OUT_FOR_DELIVERY");
-    await expect(markDelivered(tenant.company.id, reqForDelivered.id, undefined, branchA.id)).rejects.toThrow();
+    await expect(markDelivered(tenant.company.id, reqForDelivered.id, PROOF, undefined, branchA.id)).rejects.toThrow();
     expect((await prisma.deliveryRequest.findUniqueOrThrow({ where: { id: reqForDelivered.id } })).status).toBe("OUT_FOR_DELIVERY");
     // Same request, correct branch — succeeds.
-    await expect(markDelivered(tenant.company.id, reqForDelivered.id, undefined, branchB.id)).resolves.toBeTruthy();
+    await expect(markDelivered(tenant.company.id, reqForDelivered.id, PROOF, undefined, branchB.id)).resolves.toBeTruthy();
 
     await cleanupTenant(tenant.company.id);
   });

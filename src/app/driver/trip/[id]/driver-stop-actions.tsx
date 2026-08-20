@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PackageCheck, PackageOpen, ArrowLeftCircle } from "lucide-react";
+import { UnloadDialog, type UnloadShipment } from "@/components/shell/unload-dialog";
 import { driverConfirmLoadAction, driverConfirmUnloadAction, driverDepartStopAction } from "../../actions";
 
 export function DriverStopActions({
@@ -14,6 +15,7 @@ export function DriverStopActions({
   unloadingEnabled,
   pendingLoad,
   pendingUnload,
+  unloadShipments,
   departed,
 }: {
   tripId: string;
@@ -22,6 +24,7 @@ export function DriverStopActions({
   unloadingEnabled: boolean;
   pendingLoad: number;
   pendingUnload: number;
+  unloadShipments: UnloadShipment[];
   departed: boolean;
 }) {
   const [pending, startTransition] = useTransition();
@@ -29,22 +32,14 @@ export function DriverStopActions({
 
   return (
     <div className="flex flex-col gap-2">
+      {/* Same dialog the office uses — the driver at the destination is often the only person who
+          sees which carton did not come off the truck. */}
       {unloadingEnabled && pendingUnload > 0 && (
-        <Button
-          size="lg"
-          variant="outline"
-          className="h-12 text-base"
-          disabled={pending}
-          onClick={() =>
-            startTransition(async () => {
-              const r = await driverConfirmUnloadAction(tripId, stopId);
-              router.refresh();
-              toast.success(`تم تفريغ ${r.shipmentsUnloaded} شحنة`);
-            })
-          }
-        >
-          <PackageOpen className="h-5 w-5" /> تأكيد التفريغ ({pendingUnload})
-        </Button>
+        <UnloadDialog
+          trigger={<Button size="lg" variant="outline" className="h-12 w-full text-base"><PackageOpen className="h-5 w-5" /> تأكيد التفريغ ({pendingUnload})</Button>}
+          shipments={unloadShipments}
+          action={(formData) => driverConfirmUnloadAction(tripId, stopId, formData)}
+        />
       )}
       {loadingEnabled && pendingLoad > 0 && (
         <Button
@@ -54,6 +49,7 @@ export function DriverStopActions({
           onClick={() =>
             startTransition(async () => {
               const r = await driverConfirmLoadAction(tripId, stopId);
+              if ("error" in r) { toast.error(r.error); return; }
               router.refresh();
               toast.success(`تم تحميل ${r.shipmentsLoaded} شحنة`);
             })
@@ -70,7 +66,8 @@ export function DriverStopActions({
           disabled={pending}
           onClick={() =>
             startTransition(async () => {
-              await driverDepartStopAction(tripId, stopId);
+              const r = await driverDepartStopAction(tripId, stopId);
+              if (r?.error) { toast.error(r.error); return; }
               router.refresh();
               toast.success("تمت مغادرة المحطة");
             })

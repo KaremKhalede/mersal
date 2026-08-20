@@ -1,5 +1,7 @@
-import { Search } from "lucide-react";
+import { Bell } from "lucide-react";
+import Link from "next/link";
 import { UserMenu } from "./user-menu";
+import { SearchInput } from "./search-input";
 
 export function Topbar({
   title,
@@ -7,29 +9,42 @@ export function Topbar({
   userSubtitle,
   searchAction,
   mobileNav,
+  notificationsHref,
+  notificationsCount = 0,
 }: {
   title: string;
   userName: string;
   userSubtitle?: string;
   searchAction?: string;
   mobileNav?: React.ReactNode;
+  notificationsHref?: string;
+  notificationsCount?: number;
 }) {
   return (
     <header className="flex items-center justify-between gap-4 border-b bg-card px-4 py-3 md:px-6 print:hidden">
       <div className="flex items-center gap-2 min-w-0">
         {mobileNav}
-        <h1 className="text-lg font-bold shrink-0 truncate">{title}</h1>
+        <h1 className="text-lg font-bold shrink-0 truncate md:hidden">{title}</h1>
       </div>
-      <div className="flex items-center gap-3 flex-1 justify-end">
-        {searchAction && (
-          <form action={searchAction} className="relative hidden sm:block w-full max-w-xs">
-            <Search className="absolute end-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              name="q"
-              placeholder="ابحث برقم الشحنة أو اسم العميل..."
-              className="w-full rounded-lg border bg-background py-2 ps-3 pe-9 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-          </form>
+      {searchAction && (
+        <form action={searchAction} className="hidden md:block flex-1 max-w-md">
+          <SearchInput placeholder="ابحث عن شحنة، عميل، رحلة..." />
+        </form>
+      )}
+      <div className="flex items-center gap-1 shrink-0">
+        {notificationsHref && (
+          <Link
+            href={notificationsHref}
+            className="relative flex h-9 w-9 items-center justify-center rounded-lg hover:bg-accent"
+            aria-label="الإشعارات"
+          >
+            <Bell className="h-5 w-5 text-muted-foreground" />
+            {notificationsCount > 0 && (
+              <span className="absolute top-1 end-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[0.65rem] font-bold text-destructive-foreground">
+                {notificationsCount > 9 ? "9+" : notificationsCount}
+              </span>
+            )}
+          </Link>
         )}
         <UserMenu name={userName} subtitle={userSubtitle} />
       </div>

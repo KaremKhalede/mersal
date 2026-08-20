@@ -6,6 +6,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 
+/**
+ * Seed-account cheat sheet for local development only.
+ *
+ * `process.env.NODE_ENV` is inlined by the bundler at build time, so in a production build this
+ * whole block is statically false and the account list is dropped from the client bundle entirely
+ * — the emails and the shared seed password never reach a real deployment's login page, which is
+ * both the first screen a customer sees and, in any environment where prisma/seed.ts was ever run,
+ * a live credential list.
+ */
+const SHOW_DEMO_ACCOUNTS = process.env.NODE_ENV !== "production";
+
 const DEMO_ACCOUNTS = [
   { label: "مدير المنصة", email: "admin@platform.dev" },
   { label: "مدير شركة (مؤسسة النور)", email: "owner@alnoor.example" },
@@ -33,17 +44,19 @@ export function LoginForm() {
         </Button>
       </form>
 
-      <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground space-y-2">
-        <p className="font-medium text-foreground">حسابات تجريبية (كلمة المرور للجميع: Passw0rd!)</p>
-        <ul className="space-y-1">
-          {DEMO_ACCOUNTS.map((a) => (
-            <li key={a.email} className="flex items-center justify-between gap-2">
-              <span>{a.label}</span>
-              <span className="text-foreground/80" dir="ltr">{a.email}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      {SHOW_DEMO_ACCOUNTS && (
+        <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground space-y-2">
+          <p className="font-medium text-foreground">حسابات تجريبية (كلمة المرور للجميع: Passw0rd!)</p>
+          <ul className="space-y-1">
+            {DEMO_ACCOUNTS.map((a) => (
+              <li key={a.email} className="flex items-center justify-between gap-2">
+                <span>{a.label}</span>
+                <span className="text-foreground/80" dir="ltr">{a.email}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

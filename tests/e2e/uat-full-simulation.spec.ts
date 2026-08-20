@@ -48,7 +48,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await cleanupTenant(tenantB.company.id);
   });
 
-  test("1. Customer handover — Shipment A created via UI with full data, price, and payment", async ({ page }) => {
+  test("1. Customer handover — Shipment A created via UI, then priced and paid afterward (intake itself carries no money fields)", async ({ page }) => {
     await login(page, tenant.adminEmail);
     await page.goto("/app/shipments");
     await page.click('button:has-text("شحنة جديدة")');
@@ -64,24 +64,41 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await page.locator(`[role="option"]:has-text("${mukalla.name}")`).click();
 
     await page.fill('input[name="cartonCount"]', "3");
-    await page.fill('input[name="shippingPrice"]', "45000");
-    await page.fill('input[name="amountPaid"]', "45000");
+    // Intake form carries no financial fields — the MVP decision is that pricing/payment are never
+    // collected at registration, only afterward (edit / "تسجيل دفعة"), so the intake screen stays
+    // purely operational.
+    await expect(page.locator('[role="dialog"] input[name="shippingPrice"]')).toHaveCount(0);
+    await expect(page.locator('[role="dialog"] input[name="amountPaid"]')).toHaveCount(0);
 
     await page.click('[role="dialog"] button:has-text("حفظ")');
     await page.waitForURL(/\/app\/shipments\/[a-z0-9]+$/);
 
     shipmentAId = page.url().split("/shipments/")[1];
-    const dbA = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentAId } });
-    shipmentANumber = dbA.shipmentNumber;
+    const dbAAtIntake = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentAId } });
+    shipmentANumber = dbAAtIntake.shipmentNumber;
 
-    expect(dbA.totalCartons).toBe(3);
+    expect(dbAAtIntake.totalCartons).toBe(3);
+    expect(dbAAtIntake.shippingPrice).toBeNull();
+    expect(Number(dbAAtIntake.amountPaid)).toBe(0);
+    expect(dbAAtIntake.loadBranchId).toBe(riyadh.id);
+    expect(dbAAtIntake.unloadBranchId).toBe(mukalla.id);
+
+    // Price is set afterward, through the ordinary edit flow (shipment is still REGISTERED).
+    await page.click('button:has-text("تعديل")');
+    await page.fill('input[name="shippingPrice"]', "45000");
+    await page.click('[role="dialog"] button:has-text("حفظ التعديلات")');
+    await expect(page.locator("text=45,000 ر.ي").first()).toBeVisible();
+
+    // Payment is recorded afterward too, through the dedicated payment flow.
+    await page.click('button:has-text("تسجيل دفعة")');
+    await page.fill('input[name="amountPaid"]', "45000");
+    await page.click('[role="dialog"] button:has-text("حفظ")');
+    await expect(page.locator('[role="dialog"]')).toBeHidden(); // FormDialog only closes on a successful save
+    await expect(page.locator("text=المتبقي")).toBeVisible();
+
+    const dbA = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentAId } });
     expect(Number(dbA.shippingPrice)).toBe(45000);
     expect(Number(dbA.amountPaid)).toBe(45000);
-    expect(dbA.loadBranchId).toBe(riyadh.id);
-    expect(dbA.unloadBranchId).toBe(mukalla.id);
-
-    await expect(page.locator("text=45000 ر.ي").first()).toBeVisible();
-    await expect(page.locator("text=المتبقي")).toBeVisible();
 
     // Platform ledger fee is per-carton and entirely separate from the 45,000 YER customer price.
     const ledger = await prisma.billingLedgerEntry.findFirst({ where: { shipmentId: shipmentAId } });
@@ -119,7 +136,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
 
     await page.fill('input[name="vehiclePlate"]', "ABC-123");
     // The driver select renders before the stop rows in the DOM, so it's always the first combobox.
-    await page.locator('[role="dialog"] button[role="combobox"]').first().click();
+    await page.locator('button[role="combobox"]').first().click();
     await page.locator(`[role="option"]:has-text("سائق اختبار")`).click();
 
     // Add two more stop rows (default is 2) to get 4.
@@ -143,7 +160,8 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await page.getByTestId("new-trip-stop-3").locator('label:has-text("تفريغ") button[role="checkbox"]').click();
 
     await page.click('button:has-text("إنشاء الرحلة")');
-    await page.waitForURL(/\/app\/trips\/[a-z0-9]+$/);
+    // Not just [a-z0-9]+$ — that also matches the /app/trips/new form page itself.
+    await page.waitForURL(/\/app\/trips\/(?!new)[a-z0-9]+$/);
     tripId = page.url().split("/trips/")[1];
 
     const dbTrip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId }, include: { stops: { orderBy: { sequence: "asc" } }, driver: true, vehicle: true } });
@@ -168,7 +186,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await page.goto(`/app/trips/${tripId}`);
 
     const riyadhCard = page.getByTestId(`stop-${riyadhStop.id}`);
-    await riyadhCard.locator('button:has-text("ربط شحنة")').click();
+    await riyadhCard.locator('button:has-text("اقتراح الشحنات")').click();
     await page.locator(`[role="dialog"] label:has-text("${shipmentANumber}")`).click();
     const [dbB, dbC] = await Promise.all([
       prisma.shipment.findUniqueOrThrow({ where: { id: shipmentBId } }),
@@ -176,7 +194,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     ]);
     await page.locator(`[role="dialog"] label:has-text("${dbB.shipmentNumber}")`).click();
     await page.locator(`[role="dialog"] label:has-text("${dbC.shipmentNumber}")`).click();
-    await page.click('[role="dialog"] button:has-text("ربط (3)")');
+    await page.click('[role="dialog"] button:has-text("إضافة (3)")');
     await expect(riyadhCard.locator(`text=${shipmentANumber}`)).toBeVisible();
 
     // Manifest math: 3 shipments, 3+2+5 = 10 cartons pending at Riyadh.
@@ -184,14 +202,14 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await expect(riyadhCard.locator("text=10 كرتون").first()).toBeVisible();
 
     const jeddahCard = page.getByTestId(`stop-${jeddahStop.id}`);
-    await jeddahCard.locator('button:has-text("ربط شحنة")').click();
+    await jeddahCard.locator('button:has-text("اقتراح الشحنات")').click();
     const [dbD, dbE] = await Promise.all([
       prisma.shipment.findUniqueOrThrow({ where: { id: shipmentDId } }),
       prisma.shipment.findUniqueOrThrow({ where: { id: shipmentEId } }),
     ]);
     await page.locator(`[role="dialog"] label:has-text("${dbD.shipmentNumber}")`).click();
     await page.locator(`[role="dialog"] label:has-text("${dbE.shipmentNumber}")`).click();
-    await page.click('[role="dialog"] button:has-text("ربط (2)")');
+    await page.click('[role="dialog"] button:has-text("إضافة (2)")');
     await expect(jeddahCard.locator("text=2 شحنة").first()).toBeVisible();
     await expect(jeddahCard.locator("text=6 كرتون").first()).toBeVisible(); // 4 + 2
 
@@ -274,7 +292,8 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await page.locator('button[role="combobox"]').first().click();
     const dbB = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentBId } });
     await page.locator(`[role="option"]:has-text("${dbB.shipmentNumber}")`).click();
-    await page.fill('input[name="arrivedCartons"]', "1");
+    // One of B's two cartons is missing, and the driver names which one.
+    await page.getByTestId(`report-carton-${dbB.shipmentNumber}-C2`).click();
     await page.click('button:has-text("إرسال البلاغ")');
     await page.waitForURL(/\/driver\/trip\/[a-z0-9]+$/);
 
@@ -287,6 +306,10 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await page.goto(`/driver/trip/${tripId}`);
     const seiyunCard = page.getByTestId(`stop-${seiyunStop.id}`);
     await seiyunCard.locator('button:has-text("تأكيد التفريغ")').click();
+    // Unload is a dialog now (P1-5): every carton starts as arrived, so confirming without touching
+    // anything is the "all of it came off" case.
+    await page.click('[role="dialog"] button:has-text("تأكيد التفريغ")');
+
     const [a, c, d, e] = await pollUntil(
       () =>
         Promise.all([
@@ -311,8 +334,8 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     // Employee later confirms the remaining carton of B showed up.
     await login(page, tenant.adminEmail);
     await page.goto(`/app/shipments/${shipmentBId}`);
-    page.once("dialog", (d) => d.accept());
     await page.click('button:has-text("تأكيد وصول الباقي")');
+    await page.click('[role="dialog"] button:has-text("تأكيد")');
     b = await pollUntil(
       () => prisma.shipment.findUniqueOrThrow({ where: { id: shipmentBId } }),
       (s) => s.status === "ARRIVED"
@@ -335,6 +358,10 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
 
     const mukallaCard = page.getByTestId(`stop-${mukallaStop.id}`);
     await mukallaCard.locator('button:has-text("تأكيد التفريغ")').click();
+    // Unload is a dialog now (P1-5): every carton starts as arrived, so confirming without touching
+    // anything is the "all of it came off" case.
+    await page.click('[role="dialog"] button:has-text("تأكيد التفريغ")');
+
     const [a, c, d] = await pollUntil(
       () =>
         Promise.all([
@@ -376,8 +403,11 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     );
     expect(a.status).toBe("READY_FOR_PICKUP");
 
-    page.once("dialog", (d) => d.accept());
     await page.click('button:has-text("تسليم من الفرع")');
+    // Handover now records who took the cartons (P1-2): the dialog asks for a name and the last 4
+    // digits of the receiver's number before the shipment may reach DELIVERED.
+    await page.fill('[role="dialog"] input[name="last4"]', "1222");
+    await page.click('[role="dialog"] button:has-text("تأكيد التسليم")');
     a = await pollUntil(
       () => prisma.shipment.findUniqueOrThrow({ where: { id: shipmentAId } }),
       (s) => s.status === "DELIVERED"
@@ -392,9 +422,12 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
   test("9. Home delivery — one shipment, one DeliveryRequest (double-click concurrency is already covered by Scenario H)", async ({ page, context }) => {
     const publicPage = await context.newPage();
     const dbD = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentDId } });
-    await publicPage.goto(`/track/${dbD.shipmentNumber}`);
+    await publicPage.goto(`/track/${dbD.trackingToken}`);
     await publicPage.click('button:has-text("توصيل للمنزل")');
     await publicPage.fill('textarea[name="destinationAddress"]', "حي الجامعة، شارع 20");
+    // Last 4 digits of the fixture's receiverPhone (+967700000000) — proof of ownership before
+    // anything that changes where the cartons go.
+    await publicPage.fill('input[name="last4"]', "0000");
     // The submit button disables itself while pending, so a same-page double-click can't reach the
     // server twice — real concurrent-request duplication is exercised server-side in Scenario H.
     await publicPage.click('button:has-text("تأكيد طلب التوصيل")');
@@ -405,6 +438,10 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     expect(d.status).toBe("DELIVERY_REQUESTED");
     const requests = await prisma.deliveryRequest.findMany({ where: { shipmentId: shipmentDId } });
     expect(requests).toHaveLength(1);
+    // A request submitted from the public page is a request, not a dispatch (P0-1): it waits in
+    // PENDING with no provider reference until an employee reviews the address.
+    expect(requests[0].status).toBe("PENDING");
+    expect(requests[0].providerRef).toBeNull();
 
     // UX note: once the request is submitted, the shipment leaves ARRIVED/READY_FOR_PICKUP, so the
     // entire pickup/delivery widget (and any "request received" confirmation) disappears from the
@@ -414,20 +451,29 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await expect(publicPage.locator('textarea[name="destinationAddress"]')).toHaveCount(0);
     await publicPage.close();
 
-    // The company-wide /app/delivery list is read-only (no action buttons) — office staff must
-    // fulfil the request from the shipment's own "التوصيل" tab instead. Noted as a UX finding.
+    // The delivery queue now carries the review step for customer-submitted requests.
     await login(page, tenant.adminEmail);
     await page.goto("/app/delivery");
     await expect(page.locator(`text=${dbD.shipmentNumber}`).first()).toBeVisible();
 
     await page.goto(`/app/shipments/${shipmentDId}`);
     await page.click('button[role="tab"]:has-text("التوصيل")');
+    // Review the address the customer supplied before anything is handed to the provider.
+    await page.click('button:has-text("مراجعة وتأكيد الطلب")');
+    await pollUntil(
+      () => prisma.deliveryRequest.findFirstOrThrow({ where: { shipmentId: shipmentDId } }),
+      (r) => r.status === "ASSIGNED"
+    );
     await page.click('button:has-text("بدء التوصيل")');
     await pollUntil(
       () => prisma.shipment.findUniqueOrThrow({ where: { id: shipmentDId } }),
       (s) => s.status === "OUT_FOR_DELIVERY"
     );
     await page.click('button:has-text("تأكيد التوصيل")');
+    // Handover now records who took the cartons (P1-2): the dialog asks for a name and the last 4
+    // digits of the receiver's number before the shipment may reach DELIVERED.
+    await page.fill('[role="dialog"] input[name="last4"]', "0000");
+    await page.click('[role="dialog"] button:has-text("تأكيد التسليم")');
     d = await pollUntil(
       () => prisma.shipment.findUniqueOrThrow({ where: { id: shipmentDId } }),
       (s) => s.status === "DELIVERED"
@@ -463,8 +509,10 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await expect(page.locator('button:has-text("وضع جاهزة للاستلام")')).toHaveCount(0);
     await expect(page.locator('button:has-text("تسجيل دفعة")')).toHaveCount(0);
 
-    page.once("dialog", (d) => d.accept());
-    await page.click('button:has-text("حل الاستثناء")');
+    // The resolve buttons speak business language now (P0-6): one per legal recovery, derived from
+    // the status recorded when the exception was raised.
+    await page.click('button:has-text("تأكيد وصولها إلى الفرع")');
+    await page.click('[role="dialog"] button:has-text("تأكيد")');
     await expect
       .poll(async () => (await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentCId } })).status)
       .toBe("ARRIVED"); // recovered to its prior state
@@ -495,8 +543,8 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
 
     await login(page, tenant.adminEmail);
     await page.goto(`/app/shipments/${shipmentEId}`);
-    page.once("dialog", (d) => d.accept());
-    await page.click('button:has-text("حل الاستثناء")');
+    await page.click('button:has-text("تأكيد وصولها إلى الفرع")');
+    await page.click('[role="dialog"] button:has-text("تأكيد")');
     await pollUntil(
       () => prisma.shipment.findUniqueOrThrow({ where: { id: shipmentEId } }),
       (s) => s.exceptionType === null
@@ -520,20 +568,21 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     expect(cLinkAfter?.unloadedAt?.getTime()).toBe(cLinkBefore?.unloadedAt?.getTime());
     expect(cLinkAfter?.cartonsUnloaded).toBe(cLinkBefore?.cartonsUnloaded);
 
-    page.once("dialog", (d) => d.accept());
-    await page.click('button:has-text("حل الاستثناء")');
+    await page.click('button:has-text("تجهيزها لاستلام العميل")');
+    await page.click('[role="dialog"] button:has-text("تأكيد")');
     // Poll the real DB state instead of a fixed sleep — router.refresh() timing (and the DOM swap
     // from ResolveExceptionButton back to ShipmentActions) isn't bounded to a fixed delay.
     await expect
       .poll(async () => (await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentCId } })).status)
       .toBe("READY_FOR_PICKUP");
 
-    // Wait for the post-resolve DOM swap to actually land before registering the next dialog
-    // handler — clicking too early risks the confirm() for THIS click firing before the handler
-    // for it is registered (the previous handler was `.once`, already consumed).
+    // Wait for the post-resolve DOM swap to actually land before clicking the next action.
     await page.locator('button:has-text("تسليم من الفرع")').waitFor({ state: "visible" });
-    page.once("dialog", (d) => d.accept());
     await page.click('button:has-text("تسليم من الفرع")');
+    // Handover now records who took the cartons (P1-2): the dialog asks for a name and the last 4
+    // digits of the receiver's number before the shipment may reach DELIVERED.
+    await page.fill('[role="dialog"] input[name="last4"]', "0000");
+    await page.click('[role="dialog"] button:has-text("تأكيد التسليم")');
     await expect
       .poll(async () => (await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentCId } })).status)
       .toBe("DELIVERED");
@@ -541,7 +590,9 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
 
   test("11. Customer tracking — public timeline for Shipment A leaks no internal data", async ({ context }) => {
     const trackPage = await context.newPage();
-    await trackPage.goto(`/track/${shipmentANumber}`);
+    // Tracking is reached by the shipment's token, never by its number (src/lib/tracking.ts).
+    const shipmentA = await prisma.shipment.findUniqueOrThrow({ where: { shipmentNumber: shipmentANumber } });
+    await trackPage.goto(`/track/${shipmentA.trackingToken}`);
     await expect(trackPage.locator("text=تم التسليم").first()).toBeVisible();
     await expect(trackPage.locator(`text=${tenant.company.name}`).first()).toBeVisible();
     // Internal identifiers (branch DB ids, employee names, exception notes) must never leak.
@@ -630,9 +681,15 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
   test("17. Owner dashboard answers the operational questions at a glance", async ({ page }) => {
     await login(page, tenant.adminEmail);
     await page.goto("/app");
-    await expect(page.locator("text=استثناءات").first()).toBeVisible();
     await expect(page.locator("text=رحلات نشطة").first()).toBeVisible();
     await expect(page.locator("text=تم التسليم").first()).toBeVisible();
     await expect(page.locator(`text=${shipmentANumber}`).first()).toBeVisible();
+
+    // Exceptions no longer get a permanent sidebar entry — the dashboard shows a conditional
+    // alert only when something's actually open (nothing is, at this point in the run, since every
+    // exception raised earlier was resolved). The list route itself must still work when visited
+    // directly, since it's kept for the dashboard alert and for staff who bookmark/know the URL.
+    await page.goto("/app/exceptions");
+    await expect(page.locator("text=لا توجد استثناءات مفتوحة حالياً")).toBeVisible();
   });
 });

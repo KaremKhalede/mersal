@@ -14,7 +14,7 @@ export default async function ReportProblemPage({ params }: { params: Promise<{ 
 
   const links = await prisma.tripShipmentStop.findMany({
     where: { tripId: id, loadedAt: { not: null }, unloadedAt: null },
-    include: { shipment: true },
+    include: { shipment: { include: { cartons: { orderBy: { cartonIndex: "asc" }, select: { id: true, cartonIndex: true, cartonCode: true } } } } },
   });
 
   const shipments = links.map((l) => l.shipment);
@@ -25,7 +25,12 @@ export default async function ReportProblemPage({ params }: { params: Promise<{ 
         <Link href={`/driver/trip/${id}`} className="text-muted-foreground"><ChevronLeft className="h-5 w-5" /></Link>
         <h1 className="text-lg font-bold">الإبلاغ عن مشكلة</h1>
       </div>
-      <ReportProblemForm tripId={id} shipments={shipments.map((s) => ({ id: s.id, shipmentNumber: s.shipmentNumber, totalCartons: s.totalCartons }))} />
+      {/* Cartons come down with the shipments so "which carton is missing" is a tap, not a number
+          the driver has to translate into an index the server then guesses back. */}
+      <ReportProblemForm
+        tripId={id}
+        shipments={shipments.map((s) => ({ id: s.id, shipmentNumber: s.shipmentNumber, totalCartons: s.totalCartons, cartons: s.cartons }))}
+      />
     </div>
   );
 }

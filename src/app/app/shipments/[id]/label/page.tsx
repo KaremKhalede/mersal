@@ -3,8 +3,9 @@ import { requireCan } from "@/lib/rbac";
 import { getShipmentDetail } from "@/modules/shipments/service";
 import { getBranchScope } from "@/lib/branch-scope";
 import { notFound } from "next/navigation";
-import { PrintButton } from "@/components/labels/print-button";
-import { CartonLabel } from "@/components/labels/carton-label";
+import Link from "next/link";
+import { ChevronRight, ChevronLeft } from "lucide-react";
+import { CartonPrintPanel } from "@/components/labels/carton-print-panel";
 import QRCode from "qrcode";
 
 export default async function ShipmentLabelPage({ params }: { params: Promise<{ id: string }> }) {
@@ -20,33 +21,38 @@ export default async function ShipmentLabelPage({ params }: { params: Promise<{ 
   // resolution — never required for normal driver bulk load/unload operations.
   const cartons = await Promise.all(
     shipment.cartons.map(async (carton) => ({
-      ...carton,
-      qrSvg: await QRCode.toString(carton.cartonCode, { type: "svg", margin: 0, width: 64 }),
+      id: carton.id,
+      shipmentNumber: shipment.shipmentNumber,
+      cartonIndex: carton.cartonIndex,
+      totalCartons: shipment.totalCartons,
+      loadBranchName: shipment.loadBranch.name,
+      unloadBranchName: shipment.unloadBranch.name,
+      receiverName: shipment.receiverName,
+      receiverPhone: shipment.receiverPhone,
+      cartonCode: carton.cartonCode,
+      qrSvg: await QRCode.toString(carton.cartonCode, { type: "svg", margin: 0, width: 88 }),
     }))
   );
 
   return (
-    <div className="p-4">
-      <div className="print:hidden mb-4">
-        <PrintButton />
+    <div className="space-y-4 p-4 print:p-0">
+      <div className="flex items-center justify-between flex-wrap gap-2 print:hidden">
+        <Link href={`/app/shipments/${shipment.id}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ChevronRight className="h-4 w-4" /> رجوع إلى الشحنة
+        </Link>
       </div>
-      <div className="grid grid-cols-2 gap-4 print:grid-cols-2">
-        {cartons.map((carton) => (
-          <CartonLabel
-            key={carton.id}
-            companyName={user.company!.name}
-            shipmentNumber={shipment.shipmentNumber}
-            cartonIndex={carton.cartonIndex}
-            totalCartons={shipment.totalCartons}
-            loadBranchName={shipment.loadBranch.name}
-            unloadBranchName={shipment.unloadBranch.name}
-            receiverName={shipment.receiverName}
-            receiverPhone={shipment.receiverPhone}
-            cartonCode={carton.cartonCode}
-            qrSvg={carton.qrSvg}
-          />
-        ))}
-      </div>
+
+      <nav aria-label="breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground print:hidden">
+        <Link href="/app/shipments" className="hover:text-foreground">الشحنات</Link>
+        <ChevronLeft className="h-3.5 w-3.5" />
+        <span>طباعة أكواد الكراتين</span>
+        <ChevronLeft className="h-3.5 w-3.5" />
+        <Link href={`/app/shipments/${shipment.id}`} className="font-medium text-primary hover:underline" dir="ltr">
+          {shipment.shipmentNumber}
+        </Link>
+      </nav>
+
+      <CartonPrintPanel companyName={user.company!.name} cartons={cartons} />
     </div>
   );
 }

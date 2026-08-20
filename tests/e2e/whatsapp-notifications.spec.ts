@@ -154,7 +154,9 @@ test.describe("WhatsApp notification dispatch", () => {
     await dispatchShipmentEvent("SHIPMENT_ARRIVED", shipment.id, `test-tracking-${shipment.id}`);
 
     const log = await prisma.notificationLog.findFirstOrThrow({ where: { shipmentId: shipment.id, event: "SHIPMENT_ARRIVED" } });
-    expect(log.message).toContain(`/track/${shipment.shipmentNumber}`);
+    expect(log.message).toContain(`/track/${shipment.trackingToken}`);
+    // The old, enumerable shape must be gone entirely.
+    expect(log.message).not.toContain(`/track/${shipment.shipmentNumber}`);
 
     await cleanupTenant(tenant.company.id);
   });

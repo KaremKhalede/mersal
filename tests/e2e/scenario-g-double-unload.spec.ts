@@ -47,9 +47,15 @@ test.describe("Scenario G — concurrent double-unload must not corrupt state", 
     await page1.goto(`/app/trips/${trip.id}`);
     await page2.goto(`/app/trips/${trip.id}`);
 
+    // Both open the unload dialog first (P1-5), then submit at the same moment — the race is on the
+    // confirm, which is the only step that writes.
     await Promise.all([
       page1.getByTestId(`stop-${stop2.id}`).locator('button:has-text("تأكيد التفريغ")').click(),
       page2.getByTestId(`stop-${stop2.id}`).locator('button:has-text("تأكيد التفريغ")').click(),
+    ]);
+    await Promise.all([
+      page1.click('[role="dialog"] button:has-text("تأكيد التفريغ")'),
+      page2.click('[role="dialog"] button:has-text("تأكيد التفريغ")'),
     ]);
     // Status flips inside the same DB transaction as the tracking event, but the customer
     // notification is dispatched as a separate step afterward — poll for it too, not just status.

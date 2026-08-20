@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { nextShipmentNumber } from "@/lib/ids";
-import { assertTransition } from "./state-machine";
+import { newTrackingToken, matchesPhoneLast4 } from "@/lib/tracking";
+import { assertTransition, exceptionRecoveryTargets, RECOVERY_ACTION_LABELS } from "./state-machine";
 import { dispatchShipmentEvent } from "@/modules/notifications/service";
-import { chargeCartonFee } from "@/modules/billing/service";
-import type { ShipmentStatus, ShipmentEvent, ExceptionType, PaymentMethod } from "@/lib/enums";
+import { chargeCartonFee, reverseUnbilledCartonFee } from "@/modules/billing/service";
+import type { ShipmentStatus, ShipmentEvent, ExceptionType, PaymentMethod, DeliveryChannel } from "@/lib/enums";
 import { SHIPMENT_STATUS_LABELS } from "@/lib/enums";
 import { logAudit } from "@/lib/audit";
 import { toMoney, toMoneyOrNull } from "@/lib/money";
@@ -92,6 +93,7 @@ export async function createShipment(input: CreateShipmentInput) {
       data: {
         companyId: input.companyId,
         shipmentNumber,
+        trackingToken: newTrackingToken(),
         customerId: input.customerId,
         receiverName: input.receiverName,
         receiverPhone: input.receiverPhone,
@@ -256,6 +258,28 @@ export async function listShipments(params: {
   return { items, total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
+/** Status-distribution counts for the shipments list header — same branch scope as the list
+ * itself, but independent of the list's own search/status filters, so the cards always read as
+ * "the whole picture" rather than shrinking to match whatever's currently filtered. */
+export async function shipmentStatusCounts(companyId: string, branchId?: string | null) {
+  const where = { companyId, ...(branchId ? shipmentTouchesBranch(branchId) : {}) };
+  const [total, delivered, inTransit, readyForPickup, needsAttention] = await Promise.all([
+    prisma.shipment.count({ where }),
+    prisma.shipment.count({ where: { ...where, status: "DELIVERED" } }),
+    prisma.shipment.count({ where: { ...where, status: { in: ["IN_TRANSIT", "AT_INTERMEDIATE_STOP"] } } }),
+    prisma.shipment.count({ where: { ...where, status: "READY_FOR_PICKUP" } }),
+    prisma.shipment.count({ where: { ...where, status: { in: ["PARTIALLY_ARRIVED", "EXCEPTION"] } } }),
+  ]);
+  return { total, delivered, inTransit, readyForPickup, needsAttention };
+}
+
+/** Every matching shipment, unpaginated — backs the "تصدير" CSV export, which must cover the
+ * whole filtered set, not just the page currently on screen. */
+export async function listShipmentsForExport(params: { companyId: string; status?: ShipmentStatus; search?: string; branchId?: string | null }) {
+  const { items } = await listShipments({ ...params, page: 1, pageSize: 10_000 });
+  return items;
+}
+
 export async function getShipmentDetail(companyId: string, shipmentId: string, branchId?: string | null) {
   const shipment = await prisma.shipment.findFirst({
     where: { id: shipmentId, companyId, ...(branchId ? shipmentTouchesBranch(branchId) : {}) },
@@ -289,9 +313,101 @@ export async function markReadyForPickup(shipmentId: string, userId?: string) {
   return updateShipmentStatus(shipmentId, "READY_FOR_PICKUP", { userId });
 }
 
-export async function confirmBranchPickup(shipmentId: string, userId?: string) {
-  await prisma.carton.updateMany({ where: { shipmentId }, data: { status: "DELIVERED" } });
-  return updateShipmentStatus(shipmentId, "DELIVERED", { userId, note: "تم الاستلام من الفرع" });
+/**
+ * What an employee must record before a shipment may be marked delivered.
+ *
+ * `last4` is checked against the shipment's own receiverPhone, reusing the public tracking page's
+ * matcher (src/lib/tracking.ts) so both places agree on what "the last 4 digits" means — including
+ * Arabic-Indic digits typed on a phone keyboard.
+ *
+ * What this check is and is not: it is NOT an authorization control. The employee running it is
+ * already authenticated, already holds shipments.updateStatus, and can read receiverPhone in full
+ * on the shipment page — so it stops no insider, and is deliberately not rate-limited the way the
+ * public action is. What it is: a recorded procedural step proving the counter asked the person in
+ * front of them for the number the shipment is filed under, which is what answers a later "I never
+ * received it". Authorization is the permission check in the action; this is the evidence.
+ */
+export type DeliveryProofInput = { receivedByName: string; last4: string; note?: string };
+
+/**
+ * Validates a handover and returns the columns to write. Throws Arabic messages the employee can
+ * act on — call sites surface them via actionResult() rather than letting them become a digest.
+ *
+ * Exported because the two handover paths (this module's branch pickup, delivery/service.ts's home
+ * delivery) must record identical evidence; a second, drifting copy of these rules is exactly the
+ * failure this prevents.
+ */
+export function deliveryProofData(
+  shipment: { receiverPhone: string },
+  input: DeliveryProofInput,
+  channel: DeliveryChannel
+) {
+  const receivedByName = input.receivedByName.trim();
+  if (receivedByName.length < 2) throw new Error("أدخل اسم الشخص الذي استلم الشحنة");
+  if (!matchesPhoneLast4(shipment.receiverPhone, input.last4)) {
+    throw new Error("آخر 4 أرقام لا تطابق جوال المستلم المسجّل");
+  }
+
+  return {
+    deliveredToName: receivedByName,
+    // The digits that were verified, taken from the number on file rather than from the input:
+    // the match above already proved they are equal, and this way the stored proof can never be a
+    // differently-formatted echo of whatever was typed.
+    deliveredToLast4: shipment.receiverPhone.replace(/\D/g, "").slice(-4),
+    deliveredAt: new Date(),
+    deliveryChannel: channel,
+    deliveryNote: input.note?.trim() || null,
+  };
+}
+
+/**
+ * The tracking line a handover leaves behind. A short handover has to say so in the timeline the
+ * customer can read, and name the cartons — "تم التسليم" alone next to a shipment that is one
+ * carton light is the kind of record that gets a company accused of hiding it.
+ */
+export function handoverNote(prefix: string, receivedByName: string, missing: { cartonCode: string }[]) {
+  const base = `${prefix} — استلمها: ${receivedByName}`;
+  if (missing.length === 0) return base;
+  return `${base} — سُلّمت مع نقص ${missing.length} كرتون (لم يُسلَّم: ${missing.map((c) => c.cartonCode).join("، ")})`;
+}
+
+/**
+ * Hands the cartons over at the branch counter.
+ *
+ * One transaction now, where it used to flip every carton to DELIVERED *before* attempting the
+ * status transition: a second click on an already-delivered shipment ran the carton update, then
+ * threw on the invalid transition, leaving the write half-applied. Proof, cartons and status all
+ * commit together or not at all, and the transition itself (DELIVERED has no outgoing edges in the
+ * state machine) is what makes a duplicate handover impossible rather than a separate flag.
+ */
+export async function confirmBranchPickup(shipmentId: string, proof: DeliveryProofInput, userId?: string) {
+  const { shipment, event, trackingEventId, missingCount } = await prisma.$transaction(async (tx) => {
+    const current = await tx.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+    const proofData = deliveryProofData(current, proof, "BRANCH_PICKUP");
+    const missing = await tx.carton.findMany({ where: { shipmentId, status: "MISSING" }, select: { cartonCode: true } });
+
+    const result = await transitionShipmentStatusTx(tx, shipmentId, "DELIVERED", {
+      note: handoverNote("تم الاستلام من الفرع", proofData.deliveredToName, missing),
+    });
+    // NOT `where: { shipmentId }`: a blanket update marked cartons that never arrived as DELIVERED,
+    // silently erasing the one fact the unload flow exists to record. You cannot hand over a carton
+    // you do not have, so a missing carton stays missing through the handover and beyond.
+    await tx.carton.updateMany({ where: { shipmentId, status: { not: "MISSING" } }, data: { status: "DELIVERED" } });
+    const updated = await tx.shipment.update({ where: { id: shipmentId }, data: proofData });
+    return { shipment: updated, event: result.event, trackingEventId: result.trackingEventId, missingCount: missing.length };
+  });
+
+  await logAudit({
+    companyId: shipment.companyId,
+    userId,
+    action: "DELIVERED",
+    entityType: "Shipment",
+    entityId: shipmentId,
+    metadata: { channel: "BRANCH_PICKUP", deliveredToName: shipment.deliveredToName, missingCount },
+  });
+
+  if (event) await dispatchShipmentEvent(event, shipmentId, trackingEventId, { missingCount });
+  return shipment;
 }
 
 /**
@@ -354,7 +470,23 @@ export async function cancelDraftShipment(companyId: string, shipmentId: string,
   if (shipment.status !== "DRAFT" && shipment.status !== "REGISTERED") {
     throw new Error("لا يمكن إلغاء الشحنة بعد بدء تجهيزها — استخدم الاستثناء بدلاً من ذلك");
   }
-  return updateShipmentStatus(shipmentId, "CANCELLED", { userId: opts.userId, note: "ألغيت قبل بدء التجهيز" });
+  const cancelled = await updateShipmentStatus(shipmentId, "CANCELLED", { userId: opts.userId, note: "ألغيت قبل بدء التجهيز" });
+
+  // The platform charges for cartons it actually moved. This action only ever runs on a shipment
+  // that never left intake, so its carton fee was never real usage — see reverseUnbilledCartonFee
+  // for why an un-invoiced fee is deleted rather than credited, and why an invoiced one is kept.
+  // After the transition, not before: a refused cancel must not drop the charge on its way out.
+  const { reversed } = await reverseUnbilledCartonFee(shipmentId);
+  await logAudit({
+    companyId: shipment.companyId,
+    userId: opts.userId,
+    action: "CANCEL",
+    entityType: "Shipment",
+    entityId: shipmentId,
+    metadata: { cartonFeeReversed: reversed },
+  });
+
+  return cancelled;
 }
 
 /** Records/updates the customer's shipping payment — separate from the platform's per-carton ledger fee. */
@@ -382,6 +514,85 @@ export async function recordPayment(
   });
 
   return shipment;
+}
+
+/**
+ * A carton that was recorded MISSING turns up after the shipment was already handed over.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * WHY THIS IS NOT confirmRemainingArrived
+ * ---------------------------------------------------------------------------------------------
+ * That one means "the rest of the shipment reached the branch", and it moves the shipment to
+ * ARRIVED — which DELIVERED cannot become, because the customer already took the rest and the
+ * handover is a fact with a signature-equivalent behind it. Reopening the shipment to record one
+ * box would rewrite a closed handover, which is the thing P0-4 exists to prevent.
+ *
+ * So this touches only what actually changed: the carton, and the derived arrived count. The
+ * shipment keeps its status, its deliveredAt, and its whole delivery proof untouched.
+ *
+ * Deliberately no WhatsApp message. There is no approved Meta template for a late carton and no
+ * eighth template is being added, so the real provider would only ever record a SKIPPED row; the
+ * customer already has the delivery message telling them a carton was short and to contact the
+ * office, and this event is customer-visible on their tracking page. A message here would be a
+ * template request, not a product gap.
+ */
+export async function confirmLateCartons(
+  companyId: string,
+  shipmentId: string,
+  cartonIds: string[],
+  opts: { userId?: string; branchScope?: string | null } = {}
+) {
+  if (cartonIds.length === 0) throw new Error("حدد الكرتون الذي وصل");
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const shipment = await tx.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+    assertSameCompany({ userType: "COMPANY_USER", companyId }, shipment.companyId);
+    assertShipmentBranchAccess(opts.branchScope, shipment);
+    if (shipment.status !== "DELIVERED") {
+      // An open shipment has its own, better path: the rest arrived, so the shipment itself moves on.
+      throw new Error("هذا الإجراء للشحنات المسلَّمة فقط — استخدم تأكيد وصول الباقي");
+    }
+
+    // Claimed, not just filtered: only cartons of this shipment that are still MISSING may flip, so
+    // a stale second submit (or a carton id from another shipment) matches zero rows and changes
+    // nothing rather than resurrecting a delivered carton.
+    const claim = await tx.carton.updateMany({
+      where: { id: { in: cartonIds }, shipmentId, status: "MISSING" },
+      data: { status: "ARRIVED" },
+    });
+    if (claim.count === 0) throw new Error("لا يوجد كرتون مفقود مطابق لهذه الشحنة");
+
+    const arrived = await tx.carton.count({ where: { shipmentId, status: { not: "MISSING" } } });
+    await tx.shipment.update({ where: { id: shipmentId }, data: { arrivedCartons: arrived } });
+
+    const cartons = await tx.carton.findMany({ where: { id: { in: cartonIds }, shipmentId }, orderBy: { cartonIndex: "asc" } });
+    const codes = cartons.map((c) => c.cartonCode).join("، ");
+    // A custom tracking type, which TrackingEvent.eventType has always allowed alongside status
+    // transitions. It is what carries "this box turned up later" into both timelines — and, being
+    // customer-visible, into the tracking page the receiver already has a link to.
+    await tx.trackingEvent.create({
+      data: {
+        shipmentId,
+        eventType: "CARTON_ARRIVED_LATE",
+        title: "وصل كرتون متأخر",
+        description: `وصل بعد تسليم الشحنة: ${codes}`,
+        isCustomerVisible: true,
+      },
+    });
+
+    return { shipment, count: claim.count, codes };
+  });
+
+  await logAudit({
+    companyId,
+    userId: opts.userId,
+    action: "LATE_CARTON_ARRIVED",
+    entityType: "Shipment",
+    entityId: shipmentId,
+    metadata: { cartons: updated.codes },
+  });
+
+  return { count: updated.count };
 }
 
 /**
@@ -421,7 +632,16 @@ export async function resolveException(shipmentId: string, userId?: string, toSt
 
   const shipment = await prisma.$transaction(async (tx) => {
     const s = await tx.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
-    const target = toStatus ?? (s.statusBeforeException as ShipmentStatus | null) ?? "RECEIVED";
+    const before = s.statusBeforeException as ShipmentStatus | null;
+    const allowed = exceptionRecoveryTargets(before);
+    const target = toStatus ?? before ?? "RECEIVED";
+    // Validated server-side against where the shipment physically was, not just against the flat
+    // transition map: the map has to permit every recovery any shipment might need, and this is
+    // what stops one shipment from taking another's. A client that posts a status outside the set
+    // is refused here, whatever the UI offered.
+    if (!allowed.includes(target)) {
+      throw new Error("لا يمكن إعادة الشحنة إلى هذه الحالة من وضعها الحالي");
+    }
     const result = await transitionShipmentStatusTx(tx, shipmentId, target, { note: "تم حل الاستثناء" });
     event = result.event;
     trackingEventId = result.trackingEventId;
@@ -436,6 +656,34 @@ export async function resolveException(shipmentId: string, userId?: string, toSt
   return shipment;
 }
 
+/** Who reported the shipment's current open exception — read from the existing audit trail
+ * (raiseException already logs a RAISE_EXCEPTION entry with the acting user), not a new field.
+ * Used by the shipment detail page so an exception shows who flagged it, not just what/why. */
+/** The recovery choices an employee may be offered for this shipment, in business language.
+ *  Derived on the server from the shipment's own recorded pre-exception status — the page renders
+ *  what this returns, and resolveException re-checks it, so the two can never drift apart. */
+export async function getExceptionRecoveryOptions(shipmentId: string) {
+  const shipment = await prisma.shipment.findUniqueOrThrow({
+    where: { id: shipmentId },
+    select: { statusBeforeException: true },
+  });
+  const before = shipment.statusBeforeException as ShipmentStatus | null;
+  return exceptionRecoveryTargets(before).map((status) => ({
+    status,
+    label: RECOVERY_ACTION_LABELS[status],
+    isPrimary: status === before,
+  }));
+}
+
+export async function getExceptionReporter(shipmentId: string) {
+  const entry = await prisma.auditLog.findFirst({
+    where: { entityType: "Shipment", entityId: shipmentId, action: "RAISE_EXCEPTION" },
+    orderBy: { createdAt: "desc" },
+    include: { user: true },
+  });
+  return entry?.user ?? null;
+}
+
 export async function listExceptions(companyId: string, branchId?: string | null) {
   return prisma.shipment.findMany({
     where: { companyId, status: "EXCEPTION", ...(branchId ? shipmentTouchesBranch(branchId) : {}) },
@@ -444,9 +692,17 @@ export async function listExceptions(companyId: string, branchId?: string | null
   });
 }
 
-export async function getShipmentByNumberPublic(shipmentNumber: string) {
+/**
+ * The public tracking page's only read path — keyed by trackingToken, never by shipmentNumber.
+ *
+ * Looking this up by shipment number is what made the page enumerable (fewer than 90k possible
+ * numbers); see src/lib/tracking.ts. Nothing else in the app should expose shipment data without a
+ * session, so this function is deliberately the single public reader and returns only what the
+ * tracking page renders.
+ */
+export async function getShipmentByTrackingToken(trackingToken: string) {
   return prisma.shipment.findUnique({
-    where: { shipmentNumber },
+    where: { trackingToken },
     include: {
       company: true,
       loadBranch: true,
@@ -455,6 +711,15 @@ export async function getShipmentByNumberPublic(shipmentNumber: string) {
       trackingEvents: { where: { isCustomerVisible: true }, orderBy: { createdAt: "asc" } },
       // Only the status is exposed publicly — address/phone/provider ref stay server-side.
       deliveryRequest: { select: { status: true } },
+      // The planned arrival at the stop where this shipment gets unloaded — the customer-facing
+      // ETA ("متى تصل شحنتي؟"). Only the open link (not yet unloaded) has a future answer; once
+      // unloaded the real arrival is already in the timeline, so no estimate is needed. Nothing
+      // else about the trip is exposed — not its number, driver, vehicle or other shipments.
+      tripLinks: {
+        where: { unloadedAt: null },
+        select: { unloadStop: { select: { plannedArrival: true } } },
+        take: 1,
+      },
     },
   });
 }

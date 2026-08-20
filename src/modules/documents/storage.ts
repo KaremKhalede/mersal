@@ -82,6 +82,24 @@ function buildStorage(): DocumentStorage {
     });
   }
 
+  // Refuse to boot on the local driver in production, the same way src/lib/secret.ts refuses to
+  // boot without SESSION_SECRET. This was documented in .env.example and enforced nowhere, and the
+  // default is `local` — so a pilot deployed to Vercel with the defaults would accept document and
+  // payment-proof uploads, report success, and lose every byte: that filesystem is read-only
+  // outside /tmp and does not survive between invocations. A silent, unrecoverable data-loss
+  // default is exactly the kind of thing that has to fail loudly at startup instead.
+  //
+  // Excluded during `next build`, which also runs with NODE_ENV=production but has no business
+  // needing storage credentials: it imports every route module to collect metadata, so an eager
+  // throw here would make a correctly-configured project fail to build on a machine that simply
+  // has no S3 keys. `next start` (and every serverless invocation) leaves NEXT_PHASE unset, which
+  // is where the check must actually bite.
+  if (process.env.NODE_ENV === "production" && process.env.NEXT_PHASE !== "phase-production-build") {
+    throw new Error(
+      "STORAGE_DRIVER=local is not valid in production — uploads would be written to an ephemeral filesystem and lost. Set STORAGE_DRIVER=s3 with S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY."
+    );
+  }
+
   // Deliberately OUTSIDE public/ — files must never be reachable by a bare static URL.
   return new LocalDocumentStorage(path.join(process.cwd(), "storage", "uploads"));
 }

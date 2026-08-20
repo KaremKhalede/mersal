@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { prisma, createTestTenant, createTestShipment, createTestTrip, login, cleanupTenant } from "./helpers";
+import { prisma, createTestTenant, createTestShipment, createTestTrip, login, cleanupTenant, expectNotFound } from "./helpers";
 
 test.describe("Scenario E — cross-tenant access must be rejected server-side", () => {
   test("company A cannot read company B's shipment, customer, trip, or document", async ({ page }) => {
@@ -26,15 +26,15 @@ test.describe("Scenario E — cross-tenant access must be rejected server-side",
 
     await login(page, tenantA.adminEmail);
 
-    // Read paths: every one of these must 404, never render tenant B's data
-    const res1 = await page.goto(`/app/shipments/${shipmentB.id}`);
-    expect(res1?.status()).toBe(404);
+    // Read paths: every one must refuse and render none of tenant B's data.
+    await page.goto(`/app/shipments/${shipmentB.id}`);
+    await expectNotFound(page, [shipmentB.shipmentNumber]);
 
-    const res2 = await page.goto(`/app/customers/${tenantB.customerId}`);
-    expect(res2?.status()).toBe(404);
+    await page.goto(`/app/customers/${tenantB.customerId}`);
+    await expectNotFound(page);
 
-    const res3 = await page.goto(`/app/trips/${tripB.id}`);
-    expect(res3?.status()).toBe(404);
+    await page.goto(`/app/trips/${tripB.id}`);
+    await expectNotFound(page, [tripB.tripNumber]);
 
     const docRes = await page.request.get(`/api/documents/${docB.id}`);
     expect(docRes.status()).toBe(404);

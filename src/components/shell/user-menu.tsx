@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, User as UserIcon } from "lucide-react";
+import { ChevronDown, LogOut, User as UserIcon } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { logoutAction } from "@/app/(auth)/login/logout-action";
@@ -18,6 +18,7 @@ export function UserMenu({ name, subtitle }: { name: string; subtitle?: string }
           <p className="text-sm font-medium leading-none">{name}</p>
           {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
         </div>
+        <ChevronDown className="hidden sm:block h-4 w-4 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuLabel className="flex items-center gap-2"><UserIcon className="h-4 w-4" /> {name}</DropdownMenuLabel>

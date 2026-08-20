@@ -17,6 +17,22 @@ import { resolveDatabaseUrl } from "../src/lib/db-url";
 
 const prisma = new PrismaClient({ datasourceUrl: resolveDatabaseUrl(process.env.DATABASE_URL) });
 
+/** The super-admin PlatformRole, created if a fresh database somehow lacks it. Every platform
+ *  account needs a role now — without one, canPlatform() correctly grants nothing. */
+async function ensureSuperAdminRole() {
+  const existing = await prisma.platformRole.findFirst({ where: { isSuperAdmin: true } });
+  if (existing) return existing;
+  return prisma.platformRole.create({
+    data: {
+      name: "مدير المنصة",
+      description: "صلاحية كاملة على لوحة إدارة المنصة",
+      permissions: "{}",
+      isSuperAdmin: true,
+      isSystem: true,
+    },
+  });
+}
+
 async function main() {
   const email = process.env.BOOTSTRAP_ADMIN_EMAIL;
   const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
@@ -43,7 +59,7 @@ async function main() {
 
   const passwordHash = await bcrypt.hash(password, 10);
   const admin = await prisma.user.create({
-    data: { name, email, passwordHash, userType: "PLATFORM_ADMIN" },
+    data: { name, email, passwordHash, userType: "PLATFORM_ADMIN", platformRoleId: (await ensureSuperAdminRole()).id },
   });
 
   console.log(`Platform Admin created: ${admin.email}`);

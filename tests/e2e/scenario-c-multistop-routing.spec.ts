@@ -65,6 +65,10 @@ test.describe("Scenario C — multi-stop routing with different destinations", (
     // Stop C: only shipmentToC should be unloaded
     await page.goto(`/app/trips/${trip.id}`);
     await page.getByTestId(`stop-${stopC.id}`).locator('button:has-text("تأكيد التفريغ")').click();
+    // Unload is a dialog now (P1-5): every carton starts as arrived, so confirming without touching
+    // anything is the "all of it came off" case.
+    await page.click('[role="dialog"] button:has-text("تأكيد التفريغ")');
+
     [toC, toD] = await pollUntil(
       () =>
         Promise.all([
@@ -86,6 +90,10 @@ test.describe("Scenario C — multi-stop routing with different destinations", (
     // Stop D: shipmentToD finally unloads
     await page.goto(`/app/trips/${trip.id}`);
     await page.getByTestId(`stop-${stopD.id}`).locator('button:has-text("تأكيد التفريغ")').click();
+    // Unload is a dialog now (P1-5): every carton starts as arrived, so confirming without touching
+    // anything is the "all of it came off" case.
+    await page.click('[role="dialog"] button:has-text("تأكيد التفريغ")');
+
     toD = await pollUntil(
       () => prisma.shipment.findUniqueOrThrow({ where: { id: shipmentToD.id } }),
       (s) => s.status === "ARRIVED"

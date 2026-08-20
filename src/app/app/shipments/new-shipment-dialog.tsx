@@ -79,26 +79,6 @@ export function NewShipmentDialog({ branches }: { branches: { id: string; name: 
           <Input id="goodsType" name="goodsType" placeholder="بضاعة عامة" />
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="shippingPrice">أجرة الشحن (ر.ي)</Label>
-          <Input id="shippingPrice" name="shippingPrice" type="number" min={0} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="amountPaid">المبلغ المدفوع</Label>
-          <Input id="amountPaid" name="amountPaid" type="number" min={0} defaultValue={0} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>طريقة الدفع</Label>
-          <Select name="paymentMethod" defaultValue="CASH">
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="CASH">نقداً</SelectItem>
-              <SelectItem value="OTHER">أخرى</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
       <div className="space-y-1.5">
         <Label htmlFor="notes">ملاحظات</Label>
         <Textarea id="notes" name="notes" rows={2} />

@@ -29,8 +29,50 @@ export function businessLocalInputToDate(value: string): Date | undefined {
   return new Date(asIfUtc.getTime() - BUSINESS_UTC_OFFSET_MINUTES * 60_000);
 }
 
-/** Formats a stored UTC instant as AST wall-clock time — the same result for every viewer,
- * regardless of the server's or the viewer's own device timezone. */
+/**
+ * Formats a stored UTC instant as AST wall-clock time — the same result for every viewer,
+ * regardless of the server's or the viewer's own device timezone.
+ *
+ * Locale is "ar-SA-u-nu-latn", not bare "ar-SA": Arabic month names, but Latin digits. Bare ar-SA
+ * resolves to numberingSystem "arab" and renders "١٨ أغسطس ٢٠٢٦", while every other number the app
+ * prints — money (toLocaleString), carton counts, `tabular-nums` table columns, and the sibling
+ * helpers below — is Latin. Mixing the two put "١٨/٨" next to "1,250 ر.ي" in the same table row.
+ * One numbering system across the whole product; the digits, not the calendar, were the problem
+ * (modern CLDR already resolves ar-SA to the Gregorian calendar).
+ */
 export function formatBusinessDateTime(date: Date, opts: Intl.DateTimeFormatOptions = {}): string {
-  return new Intl.DateTimeFormat("ar-SA", { timeZone: BUSINESS_TIMEZONE, ...opts }).format(date);
+  return new Intl.DateTimeFormat("ar-SA-u-nu-latn", { timeZone: BUSINESS_TIMEZONE, ...opts }).format(date);
+}
+
+/**
+ * Date + time in one string — the "when did this happen" stamp for tracking timelines, activity
+ * feeds and log tables. Exists so those call sites stop reaching for a bare
+ * `new Date(x).toLocaleString("ar-SA")`, which renders in the *viewer's* timezone (a customer
+ * opening the public tracking page from outside AST saw times shifted by hours) and in a different
+ * numbering system from the rest of the page.
+ */
+export function formatBusinessStamp(date: Date): string {
+  return formatBusinessDateTime(date, {
+    year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+/** Calendar date as YYYY-MM-DD in business time. Uses en-CA because "ar-SA" resolves to Arabic-Indic
+ * digits — wrong for a stored Gregorian registration date. */
+export function formatBusinessDate(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUSINESS_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/** Clock time as h:mm with Latin digits, e.g. "10:30 ص". */
+export function formatBusinessTime(date: Date): string {
+  return new Intl.DateTimeFormat("ar-SA-u-nu-latn", {
+    timeZone: BUSINESS_TIMEZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }

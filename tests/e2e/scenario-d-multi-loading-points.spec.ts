@@ -70,6 +70,10 @@ test.describe("Scenario D — multiple loading points on one trip", () => {
     // Final stop unloads both
     await page.goto(`/app/trips/${trip.id}`);
     await page.getByTestId(`stop-${stopC.id}`).locator('button:has-text("تأكيد التفريغ")').click();
+    // Unload is a dialog now (P1-5): every carton starts as arrived, so confirming without touching
+    // anything is the "all of it came off" case.
+    await page.click('[role="dialog"] button:has-text("تأكيد التفريغ")');
+
     const [a, b] = await pollUntil(
       () =>
         Promise.all([

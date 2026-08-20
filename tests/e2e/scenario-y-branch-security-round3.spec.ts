@@ -4,6 +4,7 @@ import {
   createTestTenant,
   createTestShipment,
   createBranchScopedUser,
+  cleanupTenant,
   login,
 } from "./helpers";
 import { assertOwnsShipment, assertOwnsShipmentExact } from "../../src/modules/shipments/service";
@@ -92,7 +93,7 @@ test.describe("Scenario Y — activity log branch scoping + exact-branch payment
     await page.waitForURL((url) => !url.pathname.includes("/activity"), { timeout: 10000 });
     expect(page.url()).not.toContain("/activity");
 
-    await prisma.company.delete({ where: { id: tenant.company.id } }).catch(() => {});
+    await cleanupTenant(tenant.company.id);
   });
 
   test("assertOwnsShipmentExact: a Branch Employee cannot pay/edit a shipment that has moved on to a different branch, even though it once touched theirs", async () => {
@@ -126,7 +127,7 @@ test.describe("Scenario Y — activity log branch scoping + exact-branch payment
     const admin = { userType: "COMPANY_USER", companyId: tenant.company.id, role: { name: "مدير الشركة" }, branchId: null };
     await expect(assertOwnsShipmentExact(admin, shipment.id)).resolves.toBeTruthy();
 
-    await prisma.company.delete({ where: { id: tenant.company.id } }).catch(() => {});
+    await cleanupTenant(tenant.company.id);
   });
 
   test("shipment edit/payment forms are rejected end-to-end once the shipment has moved to a different branch, and succeed once it's back", async ({ page }) => {
@@ -165,10 +166,10 @@ test.describe("Scenario Y — activity log branch scoping + exact-branch payment
 
     // Edit: same rejection.
     await page.click('button:has-text("تعديل")');
-    await page.fill('input[name="receiverPhone"]', "+967799999999");
+    await page.fill('input[name="receiverPhone"]', "+967779999999");
     await page.click('[role="dialog"] button:has-text("حفظ التعديلات")');
     await expect(page.locator("text=FORBIDDEN")).toBeVisible();
-    expect((await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } })).receiverPhone).not.toBe("+967799999999");
+    expect((await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } })).receiverPhone).not.toBe("+967779999999");
     await page.keyboard.press("Escape");
 
     // Move the shipment back to the employee's own branch — now both actions must succeed.
@@ -183,6 +184,6 @@ test.describe("Scenario Y — activity log branch scoping + exact-branch payment
       .poll(async () => Number((await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } })).amountPaid))
       .toBe(500);
 
-    await prisma.company.delete({ where: { id: tenant.company.id } }).catch(() => {});
+    await cleanupTenant(tenant.company.id);
   });
 });

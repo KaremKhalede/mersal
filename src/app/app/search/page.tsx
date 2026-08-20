@@ -1,5 +1,6 @@
 import { requireCompanyUser } from "@/lib/auth";
 import { globalSearch } from "@/modules/reports/service";
+import { getBranchScope } from "@/lib/branch-scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ShipmentStatusBadge } from "@/components/ui/status-badge";
 import Link from "next/link";
@@ -7,7 +8,7 @@ import Link from "next/link";
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const user = await requireCompanyUser();
   const { q = "" } = await searchParams;
-  const results = await globalSearch(user.companyId!, q);
+  const results = await globalSearch(user.companyId!, q, getBranchScope(user));
 
   return (
     <div className="space-y-4">

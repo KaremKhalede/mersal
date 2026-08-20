@@ -48,6 +48,10 @@ test.describe("Scenario M — delivery queue operations and customer delivery co
     await page.reload();
     const row2 = page.locator(`tr:has-text("${shipment.shipmentNumber}")`).first();
     await row2.locator('button:has-text("تأكيد التوصيل")').click();
+    // Handover now records who took the cartons (P1-2): the dialog asks for a name and the last 4
+    // digits of the receiver's number before the shipment may reach DELIVERED.
+    await page.fill('[role="dialog"] input[name="last4"]', "0000");
+    await page.click('[role="dialog"] button:has-text("تأكيد التسليم")');
     [dbShipment, dbReq] = await pollUntil(
       () =>
         Promise.all([
@@ -121,21 +125,26 @@ test.describe("Scenario M — delivery queue operations and customer delivery co
     await prisma.shipment.update({ where: { id: shipment.id }, data: { arrivedCartons: 2 } });
 
     const publicPage = await context.newPage();
-    await publicPage.goto(`/track/${shipment.shipmentNumber}`);
+    await publicPage.goto(`/track/${shipment.trackingToken}`);
     await publicPage.click('button:has-text("توصيل للمنزل")');
     await publicPage.fill('textarea[name="destinationAddress"]', "حي الجامعة، شارع 20");
+    await publicPage.fill('input[name="last4"]', "0000");
     await publicPage.click('button:has-text("تأكيد طلب التوصيل")');
     await publicPage.waitForTimeout(500);
 
-    await expect(publicPage.locator("text=تم طلب التوصيل بنجاح").first()).toBeVisible();
-    await expect(publicPage.locator("text=سيتم التواصل معك عند بدء التوصيل").first()).toBeVisible();
+    // A customer request is PENDING review, not a dispatch — the copy must not promise otherwise.
+    await expect(publicPage.locator("text=تم استلام طلب التوصيل").first()).toBeVisible();
+    await expect(publicPage.locator("text=سيراجعه الفرع").first()).toBeVisible();
 
     // Not a client-only flash — reflects the real DeliveryRequest row on a hard refresh.
     await publicPage.reload();
-    await expect(publicPage.locator("text=تم طلب التوصيل بنجاح").first()).toBeVisible();
+    await expect(publicPage.locator("text=تم استلام طلب التوصيل").first()).toBeVisible();
 
     const requests = await prisma.deliveryRequest.findMany({ where: { shipmentId: shipment.id } });
     expect(requests).toHaveLength(1);
+    // Nothing was handed to the delivery provider by an unauthenticated caller.
+    expect(requests[0].status).toBe("PENDING");
+    expect(requests[0].providerRef).toBeNull();
 
     // Once the office moves it to OUT_FOR_DELIVERY, the tracking page's message updates accordingly.
     await prisma.deliveryRequest.update({ where: { id: requests[0].id }, data: { status: "OUT_FOR_DELIVERY" } });

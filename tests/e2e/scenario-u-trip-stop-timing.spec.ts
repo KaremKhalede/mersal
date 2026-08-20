@@ -95,7 +95,7 @@ test.describe("Scenario U — trip stop on-time / at-risk / late", () => {
     await page.click('button:has-text("رحلة جديدة")');
 
     const stopRows = page.locator('[data-testid^="new-trip-stop-"]');
-    const comboboxes = page.locator('[role="dialog"] button[role="combobox"]');
+    const comboboxes = page.locator('button[role="combobox"]');
     await comboboxes.nth(1).click(); // stop 0's branch select (0 is the driver select)
     await page.locator(`[role="option"]:has-text("${branchA.name}")`).click();
     await comboboxes.nth(2).click(); // stop 1's branch select
@@ -103,8 +103,9 @@ test.describe("Scenario U — trip stop on-time / at-risk / late", () => {
 
     await stopRows.nth(0).locator('input[name="stopPlannedArrival"]').fill("2026-06-01T09:30");
 
-    await page.click('[role="dialog"] button:has-text("إنشاء الرحلة")');
-    await page.waitForURL(/\/app\/trips\//);
+    await page.click('button:has-text("إنشاء الرحلة")');
+    // Not just /\/app\/trips\// — that also matches the /app/trips/new form page itself.
+    await page.waitForURL(/\/app\/trips\/(?!new)[a-z0-9]+$/);
 
     const tripId = page.url().split("/trips/")[1];
     const stops = await prisma.tripStop.findMany({ where: { tripId }, orderBy: { sequence: "asc" } });
@@ -125,12 +126,13 @@ test.describe("Scenario U — trip stop on-time / at-risk / late", () => {
     const utc = businessLocalInputToDate("2026-06-01T09:30");
     expect(utc?.toISOString()).toBe("2026-06-01T06:30:00.000Z");
 
-    // "ar-SA" renders Arabic-Indic digits (٠٩:٣٠), consistent with the rest of this Arabic-first
-    // app — not a bug, so assert the actual hour/minute components rather than a Latin-digit string.
+    // formatBusinessDateTime pins the locale to "ar-SA-u-nu-latn": Arabic month/weekday names with
+    // Latin digits. Bare "ar-SA" resolves to numberingSystem "arab" (٠٩:٣٠), which put Arabic-Indic
+    // dates next to Latin money and carton counts in the same table row — see timezone.ts.
     const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(utc!);
     expect(parts.find((p) => p.type === "hour")?.value).toBe("09");
     expect(parts.find((p) => p.type === "minute")?.value).toBe("30");
-    expect(formatBusinessDateTime(utc!, { hour: "2-digit", minute: "2-digit", hour12: false })).toBe("٠٩:٣٠");
+    expect(formatBusinessDateTime(utc!, { hour: "2-digit", minute: "2-digit", hour12: false })).toBe("09:30");
 
     expect(businessLocalInputToDate("")).toBeUndefined();
   });

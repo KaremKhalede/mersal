@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FileText, Download } from "lucide-react";
 import { uploadDocumentAction } from "./actions";
 import { DOCUMENT_TYPE_LABELS, type DocumentType } from "@/lib/enums";
+import { formatBusinessDate } from "@/lib/timezone";
 
 type Doc = { id: string; docType: string; fileName: string; filePath: string; uploadedAt: Date | string };
 
@@ -42,7 +43,7 @@ export function DocumentsPanel({ shipmentId, documents }: { companyId: string; s
         </div>
         <div className="space-y-1.5">
           <label className="text-xs text-muted-foreground">الملف</label>
-          <input type="file" name="file" required className="block text-sm" />
+          <input type="file" name="file" required accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp" className="block text-sm" />
         </div>
         <Button type="submit" disabled={pending} size="sm">{pending ? "جارٍ الرفع..." : "رفع"}</Button>
       </form>
@@ -53,7 +54,7 @@ export function DocumentsPanel({ shipmentId, documents }: { companyId: string; s
             <FileText className="h-4 w-4 text-muted-foreground" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{d.fileName}</p>
-              <p className="text-xs text-muted-foreground">{DOCUMENT_TYPE_LABELS[d.docType as DocumentType] ?? d.docType} · {new Date(d.uploadedAt).toLocaleDateString("ar-SA")}</p>
+              <p className="text-xs text-muted-foreground">{DOCUMENT_TYPE_LABELS[d.docType as DocumentType] ?? d.docType} · <span dir="ltr">{formatBusinessDate(new Date(d.uploadedAt))}</span></p>
             </div>
             <Download className="h-4 w-4 text-muted-foreground" />
           </a>

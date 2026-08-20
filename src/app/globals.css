@@ -136,3 +136,66 @@
     @apply font-sans;
   }
 }
+
+/*
+ * Default print page geometry for the whole app: A4 with a normal margin.
+ *
+ * The thermal-label size that used to live here was declared globally, and `@page` is a
+ * document-level rule that no CSS selector can scope — so every printable surface in the product
+ * inherited a 100×150mm page. The trip manifest is laid out for A4 (`max-w-[210mm]`), the invoice's
+ * "تحميل PDF" button is window.print(), and the shipments list has a print button: all three came
+ * out on thermal-label pages, clipped. Labels were the only thing printing correctly.
+ *
+ * The label geometry now ships with the label UI itself (see CartonPrintPanel, which renders its own
+ * <style> containing the @page override). A rule in the body cascades after this stylesheet in the
+ * head, so on a label page it wins; on every other page it simply does not exist.
+ */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  /* The on-screen responsive grid must collapse to a plain block flow in print, otherwise its
+     columns/gap fight the fixed 100mm×150mm card size below and cards share a page. */
+  .labels-grid {
+    display: block !important;
+    gap: 0 !important;
+  }
+
+  .carton-print-card {
+    display: block !important;
+    width: 100mm !important;
+    height: 150mm !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    break-after: page !important;
+    page-break-after: always !important;
+    overflow: hidden !important;
+  }
+
+  /* The carton badge, QR-code chip, and logo tile are solid-black CSS backgrounds, not vector fill
+     — without this they're as invisible on paper as the old background-color barcode bars were,
+     since print engines drop "background graphics" unless the user opts in (off by default in
+     Chrome's print preview; ignored outright by many thermal/POS drivers). */
+  .carton-print-card,
+  .carton-print-card * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .carton-print-card:last-child {
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+}

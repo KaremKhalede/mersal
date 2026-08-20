@@ -1,78 +1,118 @@
 import { requireCompanyUser } from "@/lib/auth";
 import { requireCan } from "@/lib/rbac";
 import { listCustomers } from "@/modules/customers/service";
+import { listBranches } from "@/modules/branches/service";
 import { getBranchScope } from "@/lib/branch-scope";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { FormDialog } from "@/components/shell/form-dialog";
-import { Plus } from "lucide-react";
+import { ActiveBadge } from "@/components/ui/status-badge";
+import { Pagination } from "@/components/ui/pagination";
+import { Users, User } from "lucide-react";
 import Link from "next/link";
-import { createCustomerAction } from "./actions";
+import { formatBusinessDateTime } from "@/lib/timezone";
+import { CustomerFilters } from "./filters";
+import { CustomerRowActions } from "./customer-row-actions";
+import { AddCustomerDialog } from "./add-customer-dialog";
 
-export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
+const PAGE_SIZE = 10;
+
+export default async function CustomersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; branchId?: string; status?: string; page?: string }>;
+}) {
   const user = await requireCompanyUser();
   requireCan(user, "customers", "view");
-  const { q, page: pageParam } = await searchParams;
-  const page = Number(pageParam || 1);
-  const { items: customers, pageCount } = await listCustomers(user.companyId!, q, getBranchScope(user), page);
+  const sp = await searchParams;
+  const page = Number(sp.page) || 1;
+  // Same convention as /app/shipments: a branch-scoped employee's view is always pinned to their
+  // own branch; a company-wide role may narrow theirs via the filter dropdown.
+  const ownScope = getBranchScope(user);
+  const effectiveBranchId = ownScope ?? (sp.branchId || undefined);
+
+  const [{ items: customers, total, pageCount }, branches] = await Promise.all([
+    listCustomers({ companyId: user.companyId!, search: sp.q, branchId: effectiveBranchId, status: sp.status, page, pageSize: PAGE_SIZE }),
+    listBranches(user.companyId!),
+  ]);
+
+  const qs = `${sp.q ? `&q=${sp.q}` : ""}${sp.branchId ? `&branchId=${sp.branchId}` : ""}${sp.status ? `&status=${sp.status}` : ""}`;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold">العملاء</h2>
-        <FormDialog
-          trigger={<Button><Plus className="h-4 w-4" /> عميل جديد</Button>}
-          title="إضافة عميل جديد"
-          action={async (fd) => {
-            "use server";
-            await createCustomerAction(fd);
-          }}
-        >
-          <div className="space-y-1.5">
-            <Label htmlFor="name">اسم العميل</Label>
-            <Input id="name" name="name" required />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Users className="h-5 w-5" />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="phone">رقم الجوال</Label>
-            <Input id="phone" name="phone" dir="ltr" required />
+          <div>
+            <h2 className="text-xl font-bold">العملاء</h2>
+            <p className="text-sm text-muted-foreground">إدارة عملاء المؤسسة ومعلومات التواصل الخاصة بهم.</p>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="address">العنوان</Label>
-            <Input id="address" name="address" />
-          </div>
-        </FormDialog>
+        </div>
+
+        <AddCustomerDialog branches={branches} />
       </div>
 
-      <form className="max-w-sm">
-        <Input name="q" defaultValue={q} placeholder="ابحث بالاسم أو رقم الجوال..." />
-      </form>
+      <CustomerFilters branches={branches} branchId={sp.branchId} status={sp.status} search={sp.q} showBranchFilter={!ownScope} />
 
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>الاسم</TableHead>
+                <TableHead>العميل</TableHead>
                 <TableHead>الجوال</TableHead>
-                <TableHead>عدد الشحنات</TableHead>
+                <TableHead>إجمالي الشحنات</TableHead>
+                <TableHead>آخر شحنة</TableHead>
+                <TableHead>الفرع الرئيسي</TableHead>
+                <TableHead>الحالة</TableHead>
+                <TableHead>الإجراءات</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {customers.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell>
-                    <Link href={`/app/customers/${c.id}`} className="font-medium text-primary hover:underline">{c.name}</Link>
-                  </TableCell>
-                  <TableCell dir="ltr" className="text-start">{c.phone}</TableCell>
-                  <TableCell>{c._count.shipments}</TableCell>
-                </TableRow>
-              ))}
+              {customers.map((c) => {
+                const lastShipment = c.shipments[0];
+                return (
+                  <TableRow key={c.id}>
+                    <TableCell>
+                      <Link href={`/app/customers/${c.id}`} className="flex items-center gap-2.5">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                          <User className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-foreground hover:text-primary hover:underline">{c.name}</span>
+                          {c.address && <span className="block truncate text-xs text-muted-foreground">{c.address}</span>}
+                        </span>
+                      </Link>
+                    </TableCell>
+                    <TableCell dir="ltr" className="text-start text-muted-foreground">{c.phone}</TableCell>
+                    <TableCell>{c._count.shipments.toLocaleString()}</TableCell>
+                    <TableCell>
+                      {lastShipment ? (
+                        <div className="text-xs">
+                          <p className="text-muted-foreground">{formatBusinessDateTime(lastShipment.createdAt, { day: "2-digit", month: "2-digit", year: "numeric" })}</p>
+                          <Link href={`/app/shipments/${lastShipment.id}`} className="font-medium text-primary hover:underline">{lastShipment.shipmentNumber}</Link>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{c.homeBranch?.name ?? "—"}</TableCell>
+                    <TableCell>
+                      <ActiveBadge active={c.status === "ACTIVE"} />
+                    </TableCell>
+                    <TableCell>
+                      <CustomerRowActions
+                        customer={{ id: c.id, name: c.name, phone: c.phone, email: c.email, address: c.address, homeBranchId: c.homeBranchId, status: c.status }}
+                        branches={branches}
+                      />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
               {customers.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground py-8">لا يوجد عملاء</TableCell>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">لا يوجد عملاء مطابقون</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -80,16 +120,14 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         </CardContent>
       </Card>
 
-      {pageCount > 1 && (
-        <div className="flex items-center justify-center gap-2 text-sm">
-          {Array.from({ length: pageCount }, (_, i) => i + 1).map((p) => (
-            <Link key={p} href={`/app/customers?page=${p}${q ? `&q=${q}` : ""}`}
-              className={`h-8 w-8 flex items-center justify-center rounded-md border ${p === page ? "bg-primary text-primary-foreground" : ""}`}>
-              {p}
-            </Link>
-          ))}
-        </div>
-      )}
+      <Pagination
+        page={page}
+        pageCount={pageCount}
+        total={total}
+        itemsShown={customers.length}
+        itemLabel="عميل"
+        buildHref={(p) => `/app/customers?page=${p}${qs}`}
+      />
     </div>
   );
 }

@@ -13,7 +13,17 @@ import { SidebarContent, type NavItem } from "./sidebar";
  * right edge). Closes on any nav-link click via event delegation (not a pathname effect, which
  * would cause a synchronous setState-in-effect cascade) so navigating never leaves a stale
  * overlay blocking the page underneath. */
-export function MobileSidebar({ brand, subBrand, items }: { brand: string; subBrand?: string; items: NavItem[] }) {
+export function MobileSidebar({
+  brand,
+  subBrand,
+  items,
+  tone,
+}: {
+  brand: string;
+  subBrand?: string;
+  items: NavItem[];
+  tone?: "company" | "platform";
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -35,7 +45,7 @@ export function MobileSidebar({ brand, subBrand, items }: { brand: string; subBr
         }}
       >
         <SheetTitle className="sr-only">القائمة الرئيسية</SheetTitle>
-        <SidebarContent brand={brand} subBrand={subBrand} items={items} />
+        <SidebarContent brand={brand} subBrand={subBrand} items={items} tone={tone} />
       </SheetContent>
     </Sheet>
   );

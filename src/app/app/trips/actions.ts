@@ -15,10 +15,12 @@ import {
   completeTrip,
   assertTripInCompany,
   assertStopInCompany,
+  suggestShipmentsForStops,
   type CreateTripStopInput,
 } from "@/modules/trips/service";
 import { findOrCreateVehicle } from "@/modules/vehicles/service";
 import { assertCan } from "@/lib/rbac";
+import { actionResult } from "@/lib/action-result";
 
 export async function createTripAction(formData: FormData) {
   const user = await requireCompanyUser();
@@ -70,8 +72,36 @@ export async function createTripAction(formData: FormData) {
     userId: user.id,
   });
 
+  // Shipments the "new trip" page's suggestion panel had checked, if any — same
+  // autoAssignShipmentToTrip call the per-stop dialog uses, so the exact same route/status/
+  // not-elsewhere-active rules apply. A shipment that lost its eligibility between the suggestion
+  // being shown and this submit (e.g. another tab just claimed it) is skipped, not fatal — the
+  // trip itself is already created and valid without it.
+  const shipmentIds = formData.getAll("shipmentIds").map(String);
+  let assignedCount = 0;
+  for (const shipmentId of shipmentIds) {
+    try {
+      await autoAssignShipmentToTrip(trip.id, shipmentId);
+      assignedCount += 1;
+    } catch {
+      // best-effort — see comment above
+    }
+  }
+
   revalidatePath("/app/trips");
-  return { tripId: trip.id };
+  return { tripId: trip.id, assignedCount, skippedCount: shipmentIds.length - assignedCount };
+}
+
+/** Shipment suggestions for the "new trip" page's live panel — recomputed client-side whenever the
+ * staged stops change, before the trip itself exists. */
+export async function suggestShipmentsAction(stops: { branchId: string; loadingEnabled: boolean; unloadingEnabled: boolean }[]) {
+  const user = await requireCompanyUser();
+  assertCan(user, "trips", "create");
+  const branchIds = stops.map((s) => s.branchId).filter(Boolean);
+  if (branchIds.length < 2) return [];
+  const branches = await prisma.branch.findMany({ where: { id: { in: branchIds } } });
+  if (branches.some((b) => b.companyId !== user.companyId)) return [];
+  return suggestShipmentsForStops(user.companyId!, stops.map((s, i) => ({ ...s, sequence: i + 1 })));
 }
 
 export async function assignShipmentAction(tripId: string, shipmentId: string) {
@@ -99,13 +129,20 @@ export async function confirmLoadAction(tripId: string, stopId: string) {
   return result;
 }
 
-export async function confirmUnloadAction(tripId: string, stopId: string) {
-  const user = await requireCompanyUser();
-  assertCan(user, "trips", "edit");
-  await assertStopInCompany(user.companyId!, stopId, tripId, getBranchScope(user));
-  const result = await confirmBulkUnload(stopId, user.id);
-  revalidatePath(`/app/trips/${tripId}`);
-  return result;
+/**
+ * The stop is re-checked against the caller's company and branch scope before anything is written,
+ * so the carton ids in the form can only ever be applied to a stop this employee may act on — a
+ * forged id is then rejected again inside confirmBulkUnload for not belonging to that stop.
+ */
+export async function confirmUnloadAction(tripId: string, stopId: string, formData: FormData) {
+  return actionResult(async () => {
+    const user = await requireCompanyUser();
+    assertCan(user, "trips", "edit");
+    await assertStopInCompany(user.companyId!, stopId, tripId, getBranchScope(user));
+    const result = await confirmBulkUnload(stopId, user.id, formData.getAll("missingCartonIds").map(String));
+    revalidatePath(`/app/trips/${tripId}`);
+    return result;
+  }, "تعذّر تأكيد التفريغ");
 }
 
 export async function departStopAction(tripId: string, stopId: string) {

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import type { CustomsStatus } from "@/lib/enums";
+import { CUSTOMS_STATUS_LABELS, type CustomsStatus } from "@/lib/enums";
 import { transitionShipmentStatusTx } from "@/modules/shipments/service";
 import { dispatchShipmentEvent } from "@/modules/notifications/service";
 import { assertSameCompany } from "@/lib/tenant";
@@ -50,6 +50,21 @@ export async function updateCustomsStatus(
 
     await logAudit({ companyId, userId: opts.userId, action: "STATUS_CHANGE", entityType: "Shipment", entityId: updated.shipmentId, metadata: { from: fromStatus, to: "EXCEPTION" } });
     await dispatchShipmentEvent("CUSTOMS_HOLD", updated.shipmentId, trackingEventId);
+  } else {
+    // Customs/border status is presented as one more tracking-timeline milestone, not a page of its
+    // own — every non-hold status change writes a TrackingEvent so it shows up right alongside
+    // "loaded"/"departed"/"arrived" on the shipment's tracking tab (and, since CLEARED is marked
+    // customer-visible, on public tracking too). ON_HOLD skips this — it already writes its own,
+    // richer event via the exception transition above.
+    await prisma.trackingEvent.create({
+      data: {
+        shipmentId: updated.shipmentId,
+        eventType: `CUSTOMS_${status}`,
+        title: CUSTOMS_STATUS_LABELS[status],
+        description: opts.notes,
+        isCustomerVisible: status === "CLEARED",
+      },
+    });
   }
 
   return updated;

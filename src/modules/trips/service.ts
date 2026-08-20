@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 import { nextTripNumber } from "@/lib/ids";
 import { transitionShipmentStatusTx } from "@/modules/shipments/service";
 import { dispatchShipmentEvent } from "@/modules/notifications/service";
@@ -9,6 +10,27 @@ import type { ShipmentEvent } from "@/lib/enums";
 
 /** Throws if the trip doesn't belong to companyId, or — when `branchScope` is set — doesn't have
  * at least one stop at that branch. Every trip action must call this before mutating. */
+/**
+ * "This shipment is physically on a truck right now."
+ *
+ * The predicate three separate call sites got wrong in the same way: they asked `unloadedAt: null`,
+ * which is true both for a shipment still riding on a trip AND for one that was merely *planned*
+ * onto a trip and never actually loaded. Those are opposite facts. A planned-but-never-loaded link
+ * blocked the trip from ever completing, and blocked the shipment from ever joining another trip —
+ * a shipment sitting untouched at the origin branch could be stranded forever by a trip that had
+ * already come and gone.
+ *
+ * `loadedAt` is what makes it real: nothing is aboard until someone confirmed loading it.
+ */
+const ONBOARD = { loadedAt: { not: null }, unloadedAt: null } as const;
+
+/** A completed trip is finished: no more loading, unloading, or departing at any of its stops. */
+async function assertTripOpen(tx: Prisma.TransactionClient, tripId: string) {
+  const trip = await tx.trip.findUniqueOrThrow({ where: { id: tripId }, select: { status: true } });
+  if (trip.status === "COMPLETED") throw new Error("الرحلة منتهية — لا يمكن تعديل محطاتها");
+  return trip;
+}
+
 export async function assertTripInCompany(companyId: string, tripId: string, branchScope?: string | null) {
   const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId }, include: { stops: true } });
   assertSameCompany({ userType: "COMPANY_USER", companyId }, trip.companyId);
@@ -25,6 +47,27 @@ export async function assertStopInCompany(companyId: string, stopId: string, tri
   if (tripId && stop.tripId !== tripId) throw new Error("المحطة لا تنتمي لهذه الرحلة");
   assertBranchMatch(branchScope, stop.branchId);
   return stop;
+}
+
+/**
+ * The driver-side twin of assertStopInCompany, and the guard every driver mutation was missing.
+ *
+ * A driver's ownership boundary is Trip.driverId, not a company/branch scope — but the *stop* still
+ * has to belong to the trip they claimed. The driver actions checked only the trip, then passed the
+ * caller's `stopId` straight to confirmBulkLoad/confirmBulkUnload/departStop, each of which resolves
+ * the stop by id on its own. A driver holding any other trip's stop id (any company's) could
+ * therefore confirm loading or unloading on it: flipping another tenant's shipment statuses, marking
+ * their cartons MISSING, and firing WhatsApp messages to their customers.
+ *
+ * Lives here rather than in the "use server" actions file for the same reason every other assert in
+ * this module does: it is directly callable from tests without a request context.
+ */
+export async function assertDriverTripStop(driverId: string, tripId: string, stopId: string) {
+  const trip = await prisma.trip.findFirst({ where: { id: tripId, driverId } });
+  if (!trip) throw new Error("هذه الرحلة ليست ضمن رحلاتك");
+  const stop = await prisma.tripStop.findFirst({ where: { id: stopId, tripId } });
+  if (!stop) throw new Error("المحطة لا تنتمي لهذه الرحلة");
+  return { trip, stop };
 }
 
 export type CreateTripStopInput = {
@@ -90,7 +133,7 @@ export async function autoAssignShipmentToTrip(tripId: string, shipmentId: strin
   if (!unloadStop) throw new Error("لا توجد محطة تفريغ مطابقة لفرع تفريغ الشحنة في هذه الرحلة");
 
   const link = await prisma.$transaction(async (tx) => {
-    const activeElsewhere = await tx.tripShipmentStop.findFirst({ where: { shipmentId, unloadedAt: null } });
+    const activeElsewhere = await tx.tripShipmentStop.findFirst({ where: { shipmentId, ...ONBOARD } });
     if (activeElsewhere) throw new Error("الشحنة مرتبطة برحلة أخرى لم تُفرَّغ بعد");
 
     const created = await tx.tripShipmentStop.create({
@@ -118,8 +161,24 @@ export async function getTripDetail(companyId: string, tripId: string, branchId?
         orderBy: { sequence: "asc" },
         include: {
           branch: true,
-          shipmentLoads: { include: { shipment: { include: { customer: true } } } },
-          shipmentUnloads: { include: { shipment: { include: { customer: true } } } },
+          // unloadBranch rides along because the driver's stop manifest has to answer "where does
+          // this shipment get off" for every row it lists — the one field that was missing from an
+          // include that already carries everything else that screen needs.
+          shipmentLoads: { include: { shipment: { include: { customer: true, unloadBranch: true } } } },
+          // Cartons ride along on the unload side only: confirming an unload is the one action that
+          // needs each carton by identity (which ones did not come off), and loading has no such
+          // question — it is still confirmed per shipment.
+          shipmentUnloads: {
+            include: {
+              shipment: {
+                include: {
+                  customer: true,
+                  unloadBranch: true,
+                  cartons: { orderBy: { cartonIndex: "asc" }, select: { id: true, cartonIndex: true, cartonCode: true, status: true } },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -148,13 +207,72 @@ export async function getTripCartonsForLabels(companyId: string, tripId: string,
   return { trip, shipments: links.map((l) => l.shipment) };
 }
 
-export async function listTrips(companyId: string, branchId?: string | null, page = 1, pageSize = 20) {
-  const where = { companyId, ...(branchId ? { stops: { some: { branchId } } } : {}) };
+/**
+ * Read model for the trip's manifest ("كشف حمولة الرحلة") — everything derived live from the trip
+ * and its linked shipments, nothing stored. Origin/destination are the trip's first and last stop
+ * (Trip has no separate from/to fields); weight is only totaled when every linked shipment has one,
+ * since a partial sum would misleadingly read as the trip's real total.
+ */
+export async function getTripManifest(companyId: string, tripId: string, branchScope?: string | null) {
+  const trip = await prisma.trip.findFirst({
+    where: { id: tripId, companyId, ...(branchScope ? { stops: { some: { branchId: branchScope } } } : {}) },
+    include: {
+      driver: true,
+      vehicle: true,
+      stops: { orderBy: { sequence: "asc" }, include: { branch: true } },
+    },
+  });
+  if (!trip) return null;
+
+  const links = await prisma.tripShipmentStop.findMany({
+    where: { tripId },
+    include: { shipment: { include: { customer: true, unloadBranch: true } } },
+    orderBy: { shipment: { shipmentNumber: "asc" } },
+  });
+  const shipments = links.map((l) => l.shipment);
+  const weights = shipments.map((s) => s.weightKg);
+
+  return {
+    trip,
+    origin: trip.stops[0]?.branch ?? null,
+    destination: trip.stops[trip.stops.length - 1]?.branch ?? null,
+    shipments,
+    totalCartons: shipments.reduce((sum, s) => sum + s.totalCartons, 0),
+    totalWeightKg: weights.every((w) => w != null) && weights.length > 0 ? weights.reduce((sum, w) => sum + (w ?? 0), 0) : null,
+  };
+}
+
+/**
+ * `status` filters the list to one TripStatus — the one filter this page genuinely needs, since
+ * "which trips are still on the road" is a different daily question from "what did we run last
+ * month" and a 20-row page mixes the two.
+ *
+ * Each row also carries its own load (`shipmentCount`/`cartonCount`, counted from the links that
+ * are still onboard, i.e. not yet unloaded) so the table can answer "how big is this trip" without
+ * opening it. Same shape the dashboard's active-trips panel already computes, so the two agree.
+ */
+export async function listTrips(
+  companyId: string,
+  branchId?: string | null,
+  page = 1,
+  pageSize = 20,
+  status?: string
+) {
+  const where = {
+    companyId,
+    ...(branchId ? { stops: { some: { branchId } } } : {}),
+    ...(status ? { status } : {}),
+  };
 
   const [items, total] = await Promise.all([
     prisma.trip.findMany({
       where,
-      include: { stops: { orderBy: { sequence: "asc" }, include: { branch: true } }, driver: true },
+      include: {
+        stops: { orderBy: { sequence: "asc" }, include: { branch: true } },
+        driver: true,
+        vehicle: { select: { plateNumber: true } },
+        shipmentLinks: { where: { unloadedAt: null }, include: { shipment: { select: { totalCartons: true } } } },
+      },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -162,7 +280,17 @@ export async function listTrips(companyId: string, branchId?: string | null, pag
     prisma.trip.count({ where }),
   ]);
 
-  return { items, total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
+  return {
+    items: items.map(({ shipmentLinks, ...t }) => ({
+      ...t,
+      shipmentCount: shipmentLinks.length,
+      cartonCount: shipmentLinks.reduce((sum, l) => sum + l.shipment.totalCartons, 0),
+    })),
+    total,
+    page,
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+  };
 }
 
 export async function getUnassignedShipmentsForStop(companyId: string, tripId: string, branchId: string) {
@@ -175,28 +303,54 @@ export async function getUnassignedShipmentsForStop(companyId: string, tripId: s
       // Not just "not on *this* trip" — a shipment still active on any other trip must not be
       // offered here either, or the dialog would let staff double-book it (autoAssignShipmentToTrip
       // rejects that at write time, but showing it as pickable here is a confusing dead end).
-      tripLinks: { none: { unloadedAt: null } },
+      tripLinks: { none: ONBOARD },
     },
-    include: { customer: true },
+    // A narrow select, not `include: { customer: true }` on the full row — the caller (a Server
+    // Component) passes this straight into AssignShipmentDialog, a Client Component; the full
+    // Shipment row carries Prisma Decimal fields (amountPaid, shippingPrice, declaredValue) that
+    // aren't plain-object serializable across that boundary. Select only what the dialog renders.
+    select: { id: true, shipmentNumber: true, totalCartons: true, customer: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   });
 }
 
-export async function getStopManifest(stopId: string) {
-  const stop = await prisma.tripStop.findUniqueOrThrow({
-    where: { id: stopId },
-    include: {
-      branch: true,
-      trip: true,
-      shipmentLoads: { where: { loadedAt: null }, include: { shipment: { include: { customer: true } } } },
-      shipmentUnloads: { where: { unloadedAt: null, loadedAt: { not: null } }, include: { shipment: { include: { customer: true } } } },
+/**
+ * Every shipment that would successfully link to a trip built from these (not-yet-created) stops —
+ * for the "new trip" page's shipment-suggestion panel, so staff confirm a proposed batch instead of
+ * hunting one by one. Mirrors autoAssignShipmentToTrip's own match rule exactly (load stop by branch,
+ * unload stop by branch at or after it in sequence) so nothing suggested here could ever fail at
+ * creation time.
+ */
+export async function suggestShipmentsForStops(
+  companyId: string,
+  stops: { branchId: string; sequence: number; loadingEnabled: boolean; unloadingEnabled: boolean }[]
+) {
+  const loadStops = stops.filter((s) => s.loadingEnabled);
+  const unloadStops = stops.filter((s) => s.unloadingEnabled);
+  if (loadStops.length === 0 || unloadStops.length === 0) return [];
+
+  const candidates = await prisma.shipment.findMany({
+    where: {
+      companyId,
+      loadBranchId: { in: loadStops.map((s) => s.branchId) },
+      unloadBranchId: { in: unloadStops.map((s) => s.branchId) },
+      status: { in: ["REGISTERED", "RECEIVED", "READY_FOR_LOADING"] },
+      // Same ONBOARD rule as the per-stop picker: only a shipment genuinely riding another trip is
+      // ineligible. One left behind by a trip that has since finished is free again.
+      tripLinks: { none: ONBOARD },
     },
+    select: {
+      id: true, shipmentNumber: true, totalCartons: true, loadBranchId: true, unloadBranchId: true,
+      customer: { select: { name: true } }, loadBranch: { select: { name: true } }, unloadBranch: { select: { name: true } },
+    },
+    orderBy: { createdAt: "asc" },
   });
 
-  const toLoadCartons = stop.shipmentLoads.reduce((sum, l) => sum + l.shipment.totalCartons, 0);
-  const toUnloadCartons = stop.shipmentUnloads.reduce((sum, l) => sum + l.shipment.totalCartons, 0);
-
-  return { stop, toLoadCartons, toUnloadCartons };
+  return candidates.filter((s) => {
+    const loadStop = loadStops.find((ls) => ls.branchId === s.loadBranchId);
+    if (!loadStop) return false;
+    return unloadStops.some((us) => us.branchId === s.unloadBranchId && us.sequence >= loadStop.sequence);
+  });
 }
 
 /**
@@ -212,6 +366,7 @@ export async function confirmBulkLoad(stopId: string, userId?: string) {
 
   const result = await prisma.$transaction(async (tx) => {
     const stop = await tx.tripStop.findUniqueOrThrow({ where: { id: stopId } });
+    await assertTripOpen(tx, stop.tripId);
     const links = await tx.tripShipmentStop.findMany({
       where: { loadStopId: stopId, loadedAt: null },
       include: { shipment: true },
@@ -227,7 +382,10 @@ export async function confirmBulkLoad(stopId: string, userId?: string) {
       });
       if (claim.count === 0) continue; // already claimed by a concurrent request
 
-      await tx.carton.updateMany({ where: { shipmentId: link.shipmentId }, data: { status: "LOADED" } });
+      // A carton recorded MISSING is not on the truck, whatever the shipment as a whole is doing —
+      // a shipment can come back through EXCEPTION and be loaded again, and that must not quietly
+      // resurrect the box nobody has seen.
+      await tx.carton.updateMany({ where: { shipmentId: link.shipmentId, status: { not: "MISSING" } }, data: { status: "LOADED" } });
       shipmentsLoaded += 1;
       cartonsLoaded += link.shipment.totalCartons;
       loadedShipmentIds.push(link.shipmentId);
@@ -256,16 +414,44 @@ export async function confirmBulkLoad(stopId: string, userId?: string) {
  * count the employee/driver actually sees) — those land on PARTIALLY_ARRIVED instead of ARRIVED.
  * Race-safe via the same per-row guarded-claim pattern as confirmBulkLoad.
  */
-export async function confirmBulkUnload(stopId: string, userId?: string, arrivedOverrides: Record<string, number> = {}) {
+/**
+ * Bulk confirm unloading at a stop, recording which cartons actually came off.
+ *
+ * `missingCartonIds` is the whole point of this signature. It replaced `arrivedOverrides`, a
+ * per-shipment *count*, which forced this function to invent identity: it marked `cartons.slice(0,
+ * arrived)` as arrived and the tail as MISSING, so "which carton is missing" was always "the
+ * last ones by index" — an answer that is right only by luck. A shipment where C3 never made it
+ * recorded C5 as the missing one, and every downstream screen, tracking note and dispute repeated
+ * that. Carton.status already modelled identity correctly; only this write path lied.
+ *
+ * The default is "everything arrived": callers pass ids only for cartons that are genuinely not
+ * there, which is the rare case. Ids are checked against the cartons of the shipments actually
+ * being unloaded at this stop, so a carton from another stop, another trip or another company is
+ * rejected rather than silently marked missing.
+ */
+export async function confirmBulkUnload(stopId: string, userId?: string, missingCartonIds: string[] = []) {
   const pendingEvents: { shipmentId: string; event: ShipmentEvent; trackingEventId: string }[] = [];
   const unloadedShipmentIds: string[] = [];
 
   const result = await prisma.$transaction(async (tx) => {
     const stop = await tx.tripStop.findUniqueOrThrow({ where: { id: stopId } });
+    await assertTripOpen(tx, stop.tripId);
     const links = await tx.tripShipmentStop.findMany({
       where: { unloadStopId: stopId, unloadedAt: null, loadedAt: { not: null } },
       include: { shipment: true },
     });
+
+    // One read for every carton in play, so ownership can be checked before anything is written:
+    // an id that is not on one of this stop's shipments must not be able to mark anything missing.
+    const stopCartons = await tx.carton.findMany({
+      where: { shipmentId: { in: links.map((l) => l.shipmentId) } },
+      orderBy: { cartonIndex: "asc" },
+    });
+    const ownIds = new Set(stopCartons.map((c) => c.id));
+    for (const id of missingCartonIds) {
+      if (!ownIds.has(id)) throw new Error("كرتون محدد لا ينتمي لشحنات هذه المحطة");
+    }
+    const missingSet = new Set(missingCartonIds);
 
     let shipmentsUnloaded = 0;
     let cartonsUnloaded = 0;
@@ -274,20 +460,24 @@ export async function confirmBulkUnload(stopId: string, userId?: string, arrived
       const claim = await tx.tripShipmentStop.updateMany({ where: { id: link.id, unloadedAt: null }, data: { unloadedAt: new Date() } });
       if (claim.count === 0) continue; // already claimed by a concurrent request
 
-      const total = link.shipment.totalCartons;
-      const arrived = Math.min(total, Math.max(0, arrivedOverrides[link.shipmentId] ?? total));
+      const cartons = stopCartons.filter((c) => c.shipmentId === link.shipmentId);
+      const missing = cartons.filter((c) => missingSet.has(c.id));
+      const arrivedIds = cartons.filter((c) => !missingSet.has(c.id)).map((c) => c.id);
+      // Counted from the cartons themselves, never from a number someone typed — the count and the
+      // identities can no longer disagree because one is derived from the other.
+      const arrived = arrivedIds.length;
+      const total = cartons.length;
 
       await tx.tripShipmentStop.update({ where: { id: link.id }, data: { cartonsUnloaded: arrived } });
 
-      const cartons = await tx.carton.findMany({ where: { shipmentId: link.shipmentId }, orderBy: { cartonIndex: "asc" } });
-      const arrivedIds = cartons.slice(0, arrived).map((c) => c.id);
-      const missingIds = cartons.slice(arrived).map((c) => c.id);
       if (arrivedIds.length) await tx.carton.updateMany({ where: { id: { in: arrivedIds } }, data: { status: "ARRIVED" } });
-      if (missingIds.length) await tx.carton.updateMany({ where: { id: { in: missingIds } }, data: { status: "MISSING" } });
+      if (missing.length) await tx.carton.updateMany({ where: { id: { in: missing.map((c) => c.id) } }, data: { status: "MISSING" } });
 
       await tx.shipment.update({ where: { id: link.shipmentId }, data: { arrivedCartons: arrived } });
       const toStatus = arrived < total ? "PARTIALLY_ARRIVED" : "ARRIVED";
-      const note = arrived < total ? `وصل ${arrived} من أصل ${total} كراتين` : undefined;
+      // The timeline names the cartons, not just a shortfall: "4 من 5" sends the office counting
+      // boxes again, "لم يصل: SH-...-C3" is actionable on its own.
+      const note = missing.length ? `وصل ${arrived} من أصل ${total} كراتين — لم يصل: ${missing.map((c) => c.cartonCode).join("، ")}` : undefined;
       const { event, trackingEventId } = await transitionShipmentStatusTx(tx, link.shipmentId, toStatus, { branchId: stop.branchId, note });
       if (event) pendingEvents.push({ shipmentId: link.shipmentId, event, trackingEventId });
 
@@ -313,6 +503,9 @@ export async function confirmBulkUnload(stopId: string, userId?: string, arrived
  * the "the rest showed up later" follow-up to confirmBulkUnload's partial path.
  */
 export async function confirmRemainingArrived(shipmentId: string, userId?: string) {
+  // Deliberately the ONE path allowed to clear MISSING: it means "the boxes turned up after all".
+  // Every other write path now preserves MISSING, so this stays the single, explicit, auditable
+  // place where a missing carton stops being missing — never a side effect of a handover.
   let event: ShipmentEvent | undefined;
   let trackingEventId: string | undefined;
 
@@ -335,30 +528,42 @@ export async function confirmRemainingArrived(shipmentId: string, userId?: strin
  * Reports a carton-level exception outside the normal unload flow (e.g. a driver noticing a missing
  * carton after already confirming unload). Reconciles the TripShipmentStop bookkeeping too, so the
  * trip's "remaining to unload" count and completeTrip's guard stay accurate.
+ *
+ * Takes the missing cartons by id for the same reason confirmBulkUnload does: this path used to
+ * accept a count and slice the tail off by index, so a driver reporting "one carton short" always
+ * blamed the highest-numbered one. Two write paths inventing identity the same wrong way is not
+ * half a bug — leaving this one alone would have kept the shipment record untrustworthy through
+ * the exact flow people use when something has already gone wrong.
  */
-export async function reportPartialArrival(shipmentId: string, arrivedCartons: number, userId?: string, note?: string) {
+export async function reportPartialArrival(shipmentId: string, missingCartonIds: string[], userId?: string, note?: string) {
   let event: ShipmentEvent | undefined;
   let trackingEventId: string | undefined;
 
   const shipment = await prisma.$transaction(async (tx) => {
-    const s = await tx.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
-    const arrived = Math.min(s.totalCartons, Math.max(0, arrivedCartons));
+    const cartons = await tx.carton.findMany({ where: { shipmentId }, orderBy: { cartonIndex: "asc" } });
+    const ownIds = new Set(cartons.map((c) => c.id));
+    for (const id of missingCartonIds) {
+      if (!ownIds.has(id)) throw new Error("كرتون محدد لا ينتمي لهذه الشحنة");
+    }
+
+    const missingSet = new Set(missingCartonIds);
+    const missing = cartons.filter((c) => missingSet.has(c.id));
+    const arrivedIds = cartons.filter((c) => !missingSet.has(c.id)).map((c) => c.id);
+    const arrived = arrivedIds.length;
 
     const openLink = await tx.tripShipmentStop.findFirst({ where: { shipmentId, loadedAt: { not: null }, unloadedAt: null } });
     if (openLink) {
       await tx.tripShipmentStop.update({ where: { id: openLink.id }, data: { unloadedAt: new Date(), cartonsUnloaded: arrived } });
     }
 
-    const cartons = await tx.carton.findMany({ where: { shipmentId }, orderBy: { cartonIndex: "asc" } });
-    const arrivedIds = cartons.slice(0, arrived).map((c) => c.id);
-    const missingIds = cartons.slice(arrived).map((c) => c.id);
     if (arrivedIds.length) await tx.carton.updateMany({ where: { id: { in: arrivedIds } }, data: { status: "ARRIVED" } });
-    if (missingIds.length) await tx.carton.updateMany({ where: { id: { in: missingIds } }, data: { status: "MISSING" } });
+    if (missing.length) await tx.carton.updateMany({ where: { id: { in: missing.map((c) => c.id) } }, data: { status: "MISSING" } });
 
     await tx.shipment.update({ where: { id: shipmentId }, data: { arrivedCartons: arrived } });
-    const status = arrived < s.totalCartons ? "PARTIALLY_ARRIVED" : "ARRIVED";
+    const status = arrived < cartons.length ? "PARTIALLY_ARRIVED" : "ARRIVED";
+    const missingNote = missing.length ? `لم يصل: ${missing.map((c) => c.cartonCode).join("، ")}` : "وصلت كل الكراتين";
     const result = await transitionShipmentStatusTx(tx, shipmentId, status, {
-      note: note ?? `وصل ${arrived} من أصل ${s.totalCartons} كراتين`,
+      note: note ? `${note} — ${missingNote}` : missingNote,
     });
     event = result.event;
     trackingEventId = result.trackingEventId;
@@ -375,6 +580,11 @@ export async function departStop(tripId: string, stopId: string, userId?: string
   const pendingEvents: { shipmentId: string; event: ShipmentEvent; trackingEventId: string }[] = [];
 
   const companyId = await prisma.$transaction(async (tx) => {
+    // Completing a trip is now possible while some planned shipment was never loaded, which makes
+    // "this trip is over" a state its stops must actually respect — otherwise the stop buttons
+    // would still be live on a finished trip and could load cargo onto a truck that came back days
+    // ago.
+    await assertTripOpen(tx, tripId);
     const claim = await tx.tripStop.updateMany({ where: { id: stopId, status: { not: "DEPARTED" } }, data: { status: "DEPARTED", actualDeparture: new Date() } });
     if (claim.count === 0) return null; // already departed — idempotent no-op on double-click
 
@@ -406,7 +616,10 @@ export async function departStop(tripId: string, stopId: string, userId?: string
 
 export async function completeTrip(tripId: string, companyId: string, userId?: string) {
   await prisma.$transaction(async (tx) => {
-    const remaining = await tx.tripShipmentStop.count({ where: { tripId, unloadedAt: null } });
+    // Only cartons actually aboard can block the trip from closing. A shipment that was planned
+    // onto this trip and never loaded stayed at its origin branch — the truck cannot be waiting to
+    // unload something it never picked up.
+    const remaining = await tx.tripShipmentStop.count({ where: { tripId, ...ONBOARD } });
     if (remaining > 0) throw new Error("لا يمكن إنهاء الرحلة قبل تفريغ جميع الشحنات");
 
     // companyId is part of the WHERE, not just the audit metadata — a trip belonging to another

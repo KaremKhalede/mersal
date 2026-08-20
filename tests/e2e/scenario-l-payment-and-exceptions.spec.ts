@@ -41,8 +41,10 @@ test.describe("Scenario L — customer payment recording and exception resolutio
     // Printable carton labels — one per physical carton, showing company/shipment/carton-index/destination/receiver.
     await page.goto(`/app/shipments/${shipment.id}/label`);
     await expect(page.locator(`text=${shipment.shipmentNumber}`).first()).toBeVisible();
-    await expect(page.locator("text=كرتون 1 / 3")).toBeVisible();
-    await expect(page.locator("text=كرتون 3 / 3")).toBeVisible();
+    // The index and its unit sit on two lines in the label design, so they're asserted separately.
+    await expect(page.getByText("1 / 3", { exact: true })).toBeVisible();
+    await expect(page.getByText("3 / 3", { exact: true })).toBeVisible();
+    await expect(page.getByText("كرتون", { exact: true }).first()).toBeVisible();
     await expect(page.locator(`text=${loadBranch.name} ← ${unloadBranch.name}`).first()).toBeVisible();
 
     await cleanupTenant(tenant.company.id);
@@ -75,12 +77,31 @@ test.describe("Scenario L — customer payment recording and exception resolutio
     expect(dbShipment.statusBeforeException).toBe("RECEIVED");
     expect(dbShipment.exceptionNote).toBe("كرتون تالف أثناء الفحص");
 
+    // The reported problem shows clearly on the shipment page itself: what, notes, who, and stage —
+    // not just a status badge, and not tucked into a separate module tab.
+    await expect(page.locator("text=كرتون تالف أثناء الفحص").first()).toBeVisible();
+    await expect(page.locator("text=أبلغ عنها:").first()).toBeVisible();
+    await expect(page.locator("text=المرحلة عند الإبلاغ:").first()).toBeVisible();
+
+    // Exceptions no longer sit in the sidebar as a permanent nav item.
+    await expect(page.locator('nav a:has-text("الاستثناءات")')).toHaveCount(0);
+
+    // The dashboard surfaces it instead, as a small conditional alert linking to the (still real,
+    // just no-longer-primary-nav) list.
+    await page.goto("/app");
+    const alert = page.locator('a[href="/app/exceptions"]:has-text("تحتاج متابعة")');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText("1");
+    await alert.click();
+    await page.waitForURL(/\/app\/exceptions$/);
+
     // Exceptions list shows the open case
-    await page.goto("/app/exceptions");
     await expect(page.locator(`text=${shipment.shipmentNumber}`).first()).toBeVisible();
 
-    page.once("dialog", (d) => d.accept());
-    await page.click('button:has-text("حل الاستثناء")');
+    // The resolve buttons speak business language now (P0-6): one per legal recovery, derived from
+    // the status recorded when the exception was raised.
+    await page.click('button:has-text("إعادتها إلى الفرع")');
+    await page.click('[role="dialog"] button:has-text("تأكيد")');
     dbShipment = await pollUntil(
       () => prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } }),
       (s) => s.status === "RECEIVED"

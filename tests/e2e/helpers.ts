@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { expect, type Page } from "@playwright/test";
 import { FULL_PERMISSIONS } from "../../src/lib/enums";
 import { resolveDatabaseUrl } from "../../src/lib/db-url";
+import { newTrackingToken } from "../../src/lib/tracking";
 
 export const prisma = new PrismaClient({ datasourceUrl: resolveDatabaseUrl(process.env.DATABASE_URL) });
 export const TEST_PASSWORD = "Passw0rd!";
@@ -50,8 +51,11 @@ export async function createTestTenant(branchCities: string[] = ["مدينة أ"
  * COMPANY_USER role other than the "مدير الشركة"/"company_admin" bypass is branch-restricted. */
 export async function createBranchScopedUser(params: { companyId: string; branchId: string; permissions: Record<string, string[]>; roleName?: string }) {
   const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
+  // Role names are now unique per company (Role.@@unique([companyId, name])) — auto-suffix the
+  // default so two calls for the same tenant (common when a test compares two employees with
+  // different permission sets) don't collide on "موظف فرع".
   const role = await prisma.role.create({
-    data: { companyId: params.companyId, name: params.roleName ?? "موظف فرع", permissions: JSON.stringify(params.permissions) },
+    data: { companyId: params.companyId, name: params.roleName ?? uniq("موظف فرع"), permissions: JSON.stringify(params.permissions) },
   });
   const email = `${uniq("branch-user")}@test.local`;
   const user = await prisma.user.create({
@@ -66,8 +70,11 @@ export async function createBranchScopedUser(params: { companyId: string; branch
 export async function createTestPlatformAdmin() {
   const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
   const email = `${uniq("platform-admin")}@test.local`;
+  // Platform accounts carry a PlatformRole now; without one they hold no permissions at all.
+  // The fixture is a super admin so existing platform tests keep exercising full access.
+  const superAdmin = await prisma.platformRole.findFirstOrThrow({ where: { isSuperAdmin: true } });
   const admin = await prisma.user.create({
-    data: { name: "مدير منصة اختبار", email, passwordHash, userType: "PLATFORM_ADMIN" },
+    data: { name: "مدير منصة اختبار", email, passwordHash, userType: "PLATFORM_ADMIN", platformRoleId: superAdmin.id },
   });
   return { email, userId: admin.id };
 }
@@ -97,9 +104,53 @@ export async function pollUntil<T>(read: () => Promise<T>, predicate: (value: T)
   return value;
 }
 
+/**
+ * Tears a test tenant down.
+ *
+ * Deleting the Company alone is NOT enough, even though almost every child carries
+ * onDelete: Cascade. TripStop.branchId and Shipment.loadBranchId/unloadBranchId/currentBranchId are
+ * required relations with no onDelete, i.e. RESTRICT — so as Postgres cascades into Branch it hits
+ * those references and aborts the whole delete. Trips and shipments therefore have to go first, in
+ * dependency order, before the company cascade can reach the branches.
+ *
+ * (The schema is right as it stands: the product never deletes a company, only suspends it — see
+ * platform/companies/actions.ts — so RESTRICT is the correct guard there. This is purely a
+ * test-teardown concern.)
+ *
+ * The old version swallowed every error with `.catch(() => {})`, so this failure was invisible and
+ * each aborted run leaked a whole tenant into the dev database — 1104 of them had piled up. Failures
+ * are warned about now instead of vanishing; teardown still never fails a passing test.
+ */
+/**
+ * Asserts a route refused to show a resource, and leaked nothing while doing it.
+ *
+ * Replaces `expect(res.status()).toBe(404)`. Since the app gained contextual Arabic not-found
+ * screens (P0-3), a route that calls notFound() renders that screen inside the already-streamed
+ * layout, and Next.js documents the response as 200 for streamed / 404 for non-streamed. The
+ * status code therefore no longer distinguishes "denied" from "rendered".
+ *
+ * What replaces it is strictly stronger: the not-found screen must be on the page AND none of the
+ * protected values may appear anywhere in it. A 404 status with leaked content would have passed
+ * the old assertion; it cannot pass this one.
+ *
+ * (URLs matching no route at all still return a real 404 — that path renders the root not-found
+ * outside any layout. Only in-segment notFound() is affected.)
+ */
+export async function expectNotFound(page: Page, mustNotLeak: string[] = []) {
+  await expect(page.locator("text=/لم نجد|غير موجودة|غير موجود/").first()).toBeVisible();
+  const body = await page.locator("body").innerText();
+  for (const value of mustNotLeak) {
+    if (value) expect(body).not.toContain(value);
+  }
+}
 export async function cleanupTenant(companyId: string) {
-  // Cascades cover most children (see schema onDelete: Cascade); company delete sweeps the rest.
-  await prisma.company.delete({ where: { id: companyId } }).catch(() => {});
+  try {
+    await prisma.trip.deleteMany({ where: { companyId } });
+    await prisma.shipment.deleteMany({ where: { companyId } });
+    await prisma.company.delete({ where: { id: companyId } });
+  } catch (err) {
+    console.warn(`[cleanupTenant] could not remove company ${companyId}:`, err);
+  }
 }
 
 /** Fixture setup mirroring modules/shipments/service.createShipment — bypasses the UI so scenario
@@ -114,15 +165,19 @@ export async function createTestShipment(params: {
   shippingPrice?: number;
   amountPaid?: number;
   paymentDate?: Date;
+  /** Defaults to a valid number. Pass "" or a malformed value to exercise the receiver-notification
+   * skip path (a receiver the office cannot reach must never break the shipment operation). */
+  receiverPhone?: string;
 }) {
   const shipmentNumber = uniq("SH");
   const shipment = await prisma.shipment.create({
     data: {
       companyId: params.companyId,
       shipmentNumber,
+      trackingToken: newTrackingToken(),
       customerId: params.customerId,
       receiverName: "مستلم اختبار",
-      receiverPhone: "+967700000000",
+      receiverPhone: params.receiverPhone ?? "+967700000000",
       loadBranchId: params.loadBranchId,
       unloadBranchId: params.unloadBranchId,
       currentBranchId: params.loadBranchId,
@@ -145,6 +200,7 @@ export async function createTestShipment(params: {
 export async function createTestTrip(params: {
   companyId: string;
   driverId?: string;
+  vehicleId?: string;
   stops: { branchId: string; loadingEnabled: boolean; unloadingEnabled: boolean; plannedArrival?: Date; actualArrival?: Date }[];
 }) {
   return prisma.trip.create({
@@ -152,6 +208,7 @@ export async function createTestTrip(params: {
       companyId: params.companyId,
       tripNumber: uniq("TR"),
       driverId: params.driverId,
+      vehicleId: params.vehicleId,
       stops: { create: params.stops.map((s, i) => ({ ...s, sequence: i + 1 })) },
     },
     include: { stops: { orderBy: { sequence: "asc" } } },
