@@ -193,9 +193,12 @@ test("pilot smoke — a shipping office's first day, end to end", async ({ page 
     const keys = logs.filter((l) => l.trackingEventId).map((l) => `${l.trackingEventId}:${l.recipient}`);
     expect(new Set(keys).size).toBe(keys.length);
 
-    await page.goto(`/track/${shipment.trackingToken}`);
+    await page.goto(`/t/${shipment.trackingToken}`);
     await expect(page.getByText(shipment.shipmentNumber)).toBeVisible();
-    await expect(page.getByText("وصلت الفرع")).toBeVisible();
+    // Twice on the page now, by design: the tracking page states the status as a headline and
+    // highlights the same step in the timeline below, and both read from CUSTOMER_TIMELINE_STEPS so
+    // they can never word it differently. Either occurrence satisfies "the customer can see it".
+    await expect(page.getByText("وصلت الفرع").first()).toBeVisible();
 
     // ---------------------------------------------------------------------------------------
     // 16-17. Handover at the counter, with proof. The last 4 digits of the receiver's own number
@@ -243,7 +246,7 @@ test("pilot smoke — a shipping office's first day, end to end", async ({ page 
 
     // The company reports its payment (it cannot mark itself paid).
     await login(page, ownerEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await page.getByRole("button", { name: /الإبلاغ عن دفعة|إبلاغ عن دفعة/ }).first().click();
     await page.fill('input[name="amount"]', "15");
     await page.getByRole("button", { name: /إرسال|حفظ|إبلاغ/ }).last().click();

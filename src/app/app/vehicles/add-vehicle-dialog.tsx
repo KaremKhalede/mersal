@@ -19,12 +19,12 @@ export function AddVehicleDialog() {
       submitLabel="حفظ المركبة"
     >
       <div className="space-y-1.5">
-        <Label htmlFor="plateNumber">رقم اللوحة *</Label>
+        <Label htmlFor="plateNumber" required>رقم اللوحة</Label>
         <Input id="plateNumber" name="plateNumber" dir="ltr" required />
       </div>
       <div className="space-y-1.5">
-        <Label>نوع المركبة *</Label>
-        <Select name="type" required>
+        <Label required>نوع المركبة</Label>
+        <Select name="type">
           <SelectTrigger className="w-full"><SelectValue placeholder="اختر النوع" /></SelectTrigger>
           <SelectContent>
             {VEHICLE_TYPES.map((t) => (

@@ -12,12 +12,13 @@ import { SHIPMENT_STATUS_LABELS, type ShipmentStatus, type ExceptionType, type P
 import { actionResult } from "@/lib/action-result";
 import { phoneError } from "@/lib/phone";
 import { toCsv } from "@/lib/csv";
+import { formatAmount, toMoney } from "@/lib/money";
 
 export async function createShipmentAction(formData: FormData) {
   const user = await requireCompanyUser();
   assertCan(user, "shipments", "create");
 
-  // Both numbers are validated before anything is written: the customer row is created by
+  // Everything rejectable is validated before anything is written: the customer row is created by
   // findOrCreateCustomer below, so a bad number would otherwise persist a customer nobody can
   // reach. The receiver defaults to the customer when left blank, exactly as it does further down.
   const customerPhone = String(formData.get("customerPhone") || "").trim();
@@ -30,17 +31,34 @@ export async function createShipmentAction(formData: FormData) {
     if (problem) return { error: problem };
   }
 
-  const customer = await findOrCreateCustomer({
-    companyId: user.companyId!,
-    name: String(formData.get("customerName")),
-    phone: customerPhone,
-  });
-
   const cartonCount = Number(formData.get("cartonCount"));
   if (!cartonCount || cartonCount < 1) return { error: "عدد الكراتين يجب أن يكون 1 على الأقل" };
 
-  const loadBranchId = String(formData.get("loadBranchId"));
-  const unloadBranchId = String(formData.get("unloadBranchId"));
+  // Both money fields are optional — a shipment registered before the price is agreed is a real
+  // case and must still save. What is checked is the same thing recordPaymentAction checks, in the
+  // same words, so the two ways of entering money into a shipment agree: a value that is present
+  // must be a finite, non-negative number.
+  //
+  // Deliberately NOT checked: amountPaid > shippingPrice. recordPaymentAction allows it, the
+  // shipment page already clamps the remainder with Math.max(0, ...), and blocking it here alone
+  // would mean the same figure is accepted through one door and refused through the other.
+  const money: [string, string][] = [["shippingPrice", "أجرة الشحن"], ["amountPaid", "المبلغ المدفوع"]];
+  for (const [field, label] of money) {
+    const raw = formData.get(field);
+    if (!raw) continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) return { error: `${label} غير صالح` };
+  }
+
+  const loadBranchId = String(formData.get("loadBranchId") || "");
+  const unloadBranchId = String(formData.get("unloadBranchId") || "");
+  // Left blank is a slip, not a bad id, and the two need different words. This is now the only
+  // thing standing between an unfilled branch and a saved shipment: the `required` that used to sit
+  // on these two <Select>s was on Radix's aria-hidden native proxy, which Chrome cannot focus — so
+  // it blocked the submit and showed nothing at all. The wording names the field's own label so the
+  // toast points at something the user can see on screen.
+  if (!loadBranchId) return { error: "اختر فرع التحميل (المنشأ)" };
+  if (!unloadBranchId) return { error: "اختر فرع التفريغ (الوجهة)" };
   const [loadBranch, unloadBranch] = await Promise.all([
     prisma.branch.findUnique({ where: { id: loadBranchId } }),
     prisma.branch.findUnique({ where: { id: unloadBranchId } }),
@@ -55,6 +73,12 @@ export async function createShipmentAction(formData: FormData) {
   } catch {
     return { error: "لا يمكنك تسجيل شحنة من فرع غير فرعك" };
   }
+
+  const customer = await findOrCreateCustomer({
+    companyId: user.companyId!,
+    name: String(formData.get("customerName")),
+    phone: customerPhone,
+  });
 
   const shipment = await createShipment({
     companyId: user.companyId!,
@@ -228,7 +252,7 @@ export async function resolveExceptionAction(shipmentId: string, toStatus?: Ship
 /** CSV text for the "تصدير" button — same filters as whatever's currently on screen, but every
  * matching row, not just the current page. The caller (export-button.tsx) prepends a UTF-8 BOM
  * before download, which Excel needs to render Arabic text correctly instead of mojibake. */
-export async function exportShipmentsCsvAction(params: { status?: ShipmentStatus; search?: string; branchId?: string | null }) {
+export async function exportShipmentsCsvAction(params: { status?: ShipmentStatus; search?: string; branchId?: string | null; unpaid?: boolean }) {
   const user = await requireCompanyUser();
   assertCan(user, "shipments", "view");
   const scope = getBranchScope(user);
@@ -237,9 +261,13 @@ export async function exportShipmentsCsvAction(params: { status?: ShipmentStatus
     status: params.status,
     search: params.search,
     branchId: scope ?? params.branchId,
+    unpaid: params.unpaid,
   });
 
-  const header = ["رقم الشحنة", "العميل", "من", "إلى", "الكراتين الواصلة", "إجمالي الكراتين", "الحالة", "تاريخ الإنشاء"];
+  // "المتبقي" is a column here for the same reason it is one on screen: the export must be the
+  // filtered list, not a different view of it. Blank — not "0" — when no price was agreed yet,
+  // which is also why those shipments never match the unpaid filter.
+  const header = ["رقم الشحنة", "العميل", "من", "إلى", "الكراتين الواصلة", "إجمالي الكراتين", "الحالة", "المتبقي", "تاريخ الإنشاء"];
   const rows = items.map((s) => [
     s.shipmentNumber,
     s.customer.name,
@@ -248,6 +276,7 @@ export async function exportShipmentsCsvAction(params: { status?: ShipmentStatus
     String(s.arrivedCartons),
     String(s.totalCartons),
     SHIPMENT_STATUS_LABELS[s.status as ShipmentStatus] ?? s.status,
+    s.shippingPrice == null ? "" : formatAmount(Math.max(0, toMoney(s.shippingPrice) - toMoney(s.amountPaid))),
     s.createdAt.toISOString().slice(0, 10),
   ]);
   return toCsv(header, rows);

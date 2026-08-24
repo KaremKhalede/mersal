@@ -9,10 +9,12 @@ import { AlertTriangle } from "lucide-react";
 import { raiseExceptionAction } from "../actions";
 import { EXCEPTION_TYPES, EXCEPTION_TYPE_LABELS } from "@/lib/enums";
 
-export function ExceptionDialog({ shipmentId }: { shipmentId: string }) {
+export function ExceptionDialog({ shipmentId, open, onOpenChange }: { shipmentId: string; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   return (
     <FormDialog
-      trigger={<Button size="sm" variant="destructive"><AlertTriangle className="h-4 w-4" /> تسجيل استثناء</Button>}
+      open={open}
+      onOpenChange={onOpenChange}
+      trigger={open === undefined ? <Button size="sm" variant="destructive"><AlertTriangle className="h-4 w-4" /> تسجيل استثناء</Button> : undefined}
       title="تسجيل استثناء"
       description="سيتم نقل الشحنة إلى حالة استثناء ويمكن إعادتها لاحقاً من صفحة الاستثناءات."
       action={raiseExceptionAction}

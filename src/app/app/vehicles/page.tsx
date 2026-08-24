@@ -11,6 +11,8 @@ import { VehicleFilters } from "./filters";
 import { AddVehicleDialog } from "./add-vehicle-dialog";
 import { VehicleRowActions } from "./vehicle-row-actions";
 import { VEHICLE_TYPE_LABELS, type VehicleType } from "@/lib/enums";
+import { PageHeader } from "@/components/shell/page-header";
+import { EmptyState, NoResults, TableEmpty } from "@/components/feedback/empty-state";
 
 const PAGE_SIZE = 10;
 
@@ -39,31 +41,21 @@ export default async function VehiclesPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Truck className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold">المركبات</h2>
-            <p className="text-sm text-muted-foreground">إدارة مركبات الشركة المستخدمة في الرحلات</p>
-          </div>
-        </div>
-
-        {canCreate && <AddVehicleDialog />}
-      </div>
+      <PageHeader
+        title="المركبات"
+        description="إدارة مركبات الشركة المستخدمة في الرحلات"
+        actions={canCreate && <AddVehicleDialog />}
+      />
 
       {vehicles.length === 0 && !sp.q && !sp.status ? (
         <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-              <Truck className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="font-medium">لا توجد مركبات</p>
-              <p className="text-sm text-muted-foreground">أضف أول مركبة لاستخدامها في الرحلات.</p>
-            </div>
-            {canCreate && <AddVehicleDialog />}
+          <CardContent className="p-0">
+            <EmptyState
+              icon={Truck}
+              title="لا توجد مركبات"
+              description="أضف أول مركبة لاستخدامها في الرحلات."
+              action={canCreate ? <AddVehicleDialog /> : undefined}
+            />
           </CardContent>
         </Card>
       ) : (
@@ -105,9 +97,9 @@ export default async function VehiclesPage({
                     </TableRow>
                   ))}
                   {vehicles.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground py-8">لا توجد مركبات مطابقة</TableCell>
-                    </TableRow>
+                    <TableEmpty colSpan={5}>
+                      <NoResults resetHref="/app/vehicles" label="لا توجد مركبات مطابقة" />
+                    </TableEmpty>
                   )}
                 </TableBody>
               </Table>

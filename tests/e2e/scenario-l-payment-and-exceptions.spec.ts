@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { prisma, createTestTenant, createTestShipment, login, cleanupTenant, pollUntil } from "./helpers";
+import { prisma, createTestTenant, createTestShipment, login, cleanupTenant, pollUntil, shipmentOverflowAction } from "./helpers";
 
 test.describe("Scenario L — customer payment recording and exception resolution", () => {
   test("recording a payment updates amountPaid without touching the platform ledger", async ({ page }) => {
@@ -36,7 +36,7 @@ test.describe("Scenario L — customer payment recording and exception resolutio
     expect(Number(ledgerAfter?.amount)).toBe(Number(ledgerBefore?.amount));
     expect(Number(ledgerAfter?.amount)).toBe(15); // 3 cartons x 5 YER
 
-    await expect(page.locator("text=45000 ر.ي").first()).toBeVisible();
+    await expect(page.locator("text=45,000 ر.ي").first()).toBeVisible();
 
     // Printable carton labels — one per physical carton, showing company/shipment/carton-index/destination/receiver.
     await page.goto(`/app/shipments/${shipment.id}/label`);
@@ -66,7 +66,7 @@ test.describe("Scenario L — customer payment recording and exception resolutio
     await login(page, tenant.adminEmail);
     await page.goto(`/app/shipments/${shipment.id}`);
 
-    await page.click('button:has-text("تسجيل استثناء")');
+    await shipmentOverflowAction(page, "تسجيل استثناء");
     await page.fill('textarea[name="note"]', "كرتون تالف أثناء الفحص");
     await page.click('[role="dialog"] button:has-text("حفظ")');
     let dbShipment = await pollUntil(

@@ -4,8 +4,9 @@ import { getBranchDetail } from "@/modules/branches/service";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ActiveBadge } from "@/components/ui/status-badge";
-import { Building2, MapPin, Users, ChevronRight } from "lucide-react";
-import Link from "next/link";
+import { Users, Phone, MapPin } from "lucide-react";
+import { formatPhoneDisplay } from "@/lib/phone";
+import { PageHeader } from "@/components/shell/page-header";
 
 export default async function BranchDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireCompanyUser();
@@ -15,24 +16,13 @@ export default async function BranchDetailPage({ params }: { params: Promise<{ i
 
   return (
     <div className="space-y-4">
-      <Link href="/app/branches" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ChevronRight className="h-4 w-4" /> رجوع إلى الفروع
-      </Link>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Building2 className="h-6 w-6" />
-        </div>
-        <div>
-          <h2 className="flex items-center gap-2 text-xl font-bold">
-            {branch.name}
-            <ActiveBadge active={branch.status === "ACTIVE"} />
-          </h2>
-          <p className="flex items-center gap-1 text-sm text-muted-foreground">
-            <MapPin className="h-3.5 w-3.5" /> {branch.city}، {branch.country}
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        variant="record"
+        title={branch.name}
+        description={`${branch.city}، ${branch.country}`}
+        badge={<ActiveBadge active={branch.status === "ACTIVE"} />}
+        parent={{ label: "الفروع", href: "/app/branches" }}
+      />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <div className="rounded-xl border bg-card p-4">
@@ -48,6 +38,36 @@ export default async function BranchDetailPage({ params }: { params: Promise<{ i
           <p className="text-xs text-muted-foreground">الدولة</p>
         </div>
       </div>
+
+      {/*
+        How to reach this branch — the two facts a customer collecting from it and a driver stuck
+        at it both need, and which the product had nowhere to store until now.
+
+        Rendered only when at least one is filled. An empty "الهاتف: —" row on every branch of every
+        company that never entered one is a line that teaches people to stop reading the card.
+      */}
+      {(branch.phone || branch.address) && (
+        <Card>
+          <CardHeader><CardTitle className="flex items-center gap-1.5 text-base"><Phone className="h-4 w-4" /> التواصل مع الفرع</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {branch.phone && (
+              <div>
+                <p className="text-xs text-muted-foreground">هاتف الفرع</p>
+                {/* A real `tel:` link: this page is opened on a phone as often as on a desk. */}
+                <a href={`tel:${branch.phone}`} dir="ltr" className="text-sm font-medium text-primary hover:underline">
+                  {formatPhoneDisplay(branch.phone)}
+                </a>
+              </div>
+            )}
+            {branch.address && (
+              <div>
+                <p className="flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3.5 w-3.5" /> العنوان</p>
+                <p className="text-sm font-medium">{branch.address}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-1.5 text-base"><Users className="h-4 w-4" /> الموظفون</CardTitle></CardHeader>

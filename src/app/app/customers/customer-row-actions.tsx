@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FormDialog } from "@/components/shell/form-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MoreVertical, Eye, Pencil, Ban, CheckCircle2 } from "lucide-react";
 import { updateCustomerAction, toggleCustomerStatusAction } from "./actions";
@@ -32,19 +32,6 @@ export function CustomerRowActions({ customer, branches }: { customer: Customer;
     });
   }
 
-  function handleEditSubmit(formData: FormData) {
-    startTransition(async () => {
-      const result = await updateCustomerAction(customer.id, formData);
-      if (result?.error) {
-        toast.error(result.error);
-        return;
-      }
-      setEditOpen(false);
-      router.refresh();
-      toast.success("تم حفظ التعديلات");
-    });
-  }
-
   return (
     <>
       <DropdownMenu>
@@ -65,47 +52,46 @@ export function CustomerRowActions({ customer, branches }: { customer: Customer;
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>تعديل بيانات العميل</DialogTitle></DialogHeader>
-          <form action={handleEditSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor={`name-${customer.id}`}>اسم العميل</Label>
-              <Input id={`name-${customer.id}`} name="name" defaultValue={customer.name} required />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`phone-${customer.id}`}>رقم الجوال</Label>
-              <Input id={`phone-${customer.id}`} name="phone" dir="ltr" defaultValue={customer.phone} required />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`email-${customer.id}`}>البريد الإلكتروني (اختياري)</Label>
-              <Input id={`email-${customer.id}`} name="email" type="email" dir="ltr" defaultValue={customer.email ?? ""} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`address-${customer.id}`}>العنوان (اختياري)</Label>
-              <Input id={`address-${customer.id}`} name="address" defaultValue={customer.address ?? ""} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`homeBranchId-${customer.id}`}>الفرع الرئيسي (اختياري)</Label>
-              <select
-                id={`homeBranchId-${customer.id}`}
-                name="homeBranchId"
-                defaultValue={customer.homeBranchId ?? ""}
-                className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              >
-                <option value="">بدون فرع محدد</option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end">
-              <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>إلغاء</Button>
-              <Button type="submit" disabled={pending}>{pending ? "جارٍ الحفظ..." : "حفظ"}</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* Controlled: the opener is a menu item, not a trigger button — Radix unmounts the menu on
+          select, which would take a nested DialogTrigger with it. */}
+      <FormDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        title="تعديل بيانات العميل"
+        successMessage="تم حفظ التعديلات"
+        action={(formData) => updateCustomerAction(customer.id, formData)}
+      >
+        <div className="space-y-1.5">
+          <Label htmlFor={`name-${customer.id}`}>اسم العميل</Label>
+          <Input id={`name-${customer.id}`} name="name" defaultValue={customer.name} required />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`phone-${customer.id}`}>رقم الجوال</Label>
+          <Input id={`phone-${customer.id}`} name="phone" dir="ltr" defaultValue={customer.phone} required />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`email-${customer.id}`}>البريد الإلكتروني (اختياري)</Label>
+          <Input id={`email-${customer.id}`} name="email" type="email" dir="ltr" defaultValue={customer.email ?? ""} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`address-${customer.id}`}>العنوان (اختياري)</Label>
+          <Input id={`address-${customer.id}`} name="address" defaultValue={customer.address ?? ""} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`homeBranchId-${customer.id}`}>الفرع الرئيسي (اختياري)</Label>
+          <select
+            id={`homeBranchId-${customer.id}`}
+            name="homeBranchId"
+            defaultValue={customer.homeBranchId ?? ""}
+            className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <option value="">بدون فرع محدد</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+        </div>
+      </FormDialog>
     </>
   );
 }

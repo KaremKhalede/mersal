@@ -38,11 +38,25 @@ export async function getBranchDetail(companyId: string, branchId: string) {
   return { branch, employees };
 }
 
-export async function createBranch(params: { companyId: string; name: string; city: string; country: string }) {
+/** `phone`/`address` are optional everywhere they appear — see the schema comment on Branch. A
+ *  blank field is stored as NULL rather than "", so a consumer can test the value itself instead of
+ *  every screen re-deciding whether an empty string counts as "no number". */
+export async function createBranch(params: {
+  companyId: string;
+  name: string;
+  city: string;
+  country: string;
+  phone?: string | null;
+  address?: string | null;
+}) {
   return prisma.branch.create({ data: params });
 }
 
-export async function updateBranch(companyId: string, branchId: string, data: { name?: string; city?: string; country?: string; status?: string }) {
+export async function updateBranch(
+  companyId: string,
+  branchId: string,
+  data: { name?: string; city?: string; country?: string; status?: string; phone?: string | null; address?: string | null }
+) {
   const branch = await prisma.branch.findFirstOrThrow({ where: { id: branchId, companyId } });
   return prisma.branch.update({ where: { id: branch.id }, data });
 }

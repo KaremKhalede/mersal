@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { prisma, createTestTenant, createTestShipment, createTestTrip, linkShipmentToTrip, login, cleanupTenant, expectNotFound } from "./helpers";
+import { test, expect } from "@playwright/test";
+import { prisma, createTestTenant, createTestShipment, createTestTrip, linkShipmentToTrip, login, cleanupTenant, expectNotFound, pollUntil, driverStopCard as stopCard } from "./helpers";
 
 /**
  * P1-3: the driver's stop showed a count and nothing else — "تأكيد التحميل (3)" with no way to know
@@ -51,11 +51,9 @@ async function addShipment(params: {
   return shipment;
 }
 
-/** The stop card the driver is looking at — every assertion is scoped to it, so a shipment listed
- *  under a different stop can never satisfy one by accident. */
-function stopCard(page: Page, stopId: string) {
-  return page.getByTestId(`stop-${stopId}`);
-}
+/* Every assertion is scoped to one stop card (see `driverStopCard`), so a shipment listed under a
+   different stop can never satisfy one by accident — and a folded stop is opened first, the way the
+   driver would tap it. */
 
 test.describe("Driver stop manifest", () => {
   test("a stop with nothing to do says so instead of showing an empty list", async ({ page }) => {
@@ -65,7 +63,7 @@ test.describe("Driver stop manifest", () => {
     await login(page, tenant.driverEmail);
     await page.goto(`/driver/trip/${trip.id}`);
 
-    const card = stopCard(page, trip.stops[0].id);
+    const card = await stopCard(page, trip.stops[0].id);
     await expect(card.locator("text=لا شيء للتحميل أو التفريغ هنا الآن")).toBeVisible();
     await expect(card.locator("text=للتحميل هنا")).toHaveCount(0);
     // Nothing to confirm, so no confirm button is offered — only departing.
@@ -92,7 +90,7 @@ test.describe("Driver stop manifest", () => {
     await login(page, tenant.driverEmail);
     await page.goto(`/driver/trip/${trip.id}`);
 
-    const card = stopCard(page, loadStop.id);
+    const card = await stopCard(page, loadStop.id);
     await expect(card.locator("text=للتحميل هنا")).toBeVisible();
     // Totals: two shipments, eleven cartons — the two numbers the driver is accountable for.
     await expect(card.getByTestId("manifest-totals")).toHaveText(/2\s*شحنة/);
@@ -106,9 +104,9 @@ test.describe("Driver stop manifest", () => {
     await expect(rowB).toContainText("7 كرتون");
     await expect(rowB).toContainText(third.city);
 
-    // "What is left" is stated explicitly, not left to be counted off the list.
-    await expect(card.getByTestId("manifest-remaining")).toHaveText(/2\s*شحنة/);
-    await expect(card.getByTestId("manifest-remaining")).toHaveText(/11\s*كرتون/);
+    // Before anything is confirmed, "المتبقي" would repeat the totals in the header word for word,
+    // so it is not drawn at all — it appears once the two figures can differ (see the next test).
+    await expect(card.getByTestId("manifest-remaining")).toHaveCount(0);
 
     await cleanupTenant(tenant.company.id);
   });
@@ -134,7 +132,7 @@ test.describe("Driver stop manifest", () => {
     await login(page, tenant.driverEmail);
     await page.goto(`/driver/trip/${trip.id}`);
 
-    const card = stopCard(page, loadStop.id);
+    const card = await stopCard(page, loadStop.id);
     await expect(card.locator("text=تم 1 من 2")).toBeVisible();
     // Both shipments stay listed — "what was done" is as much a question as "what is left".
     await expect(card.getByTestId(`manifest-row-${loaded.shipmentNumber}`)).toBeVisible();
@@ -168,7 +166,7 @@ test.describe("Driver stop manifest", () => {
     await login(page, tenant.driverEmail);
     await page.goto(`/driver/trip/${trip.id}`);
 
-    const card = stopCard(page, unloadStop.id);
+    const card = await stopCard(page, unloadStop.id);
     await expect(card.locator("text=للتفريغ هنا")).toBeVisible();
     await expect(card.getByTestId("manifest-totals")).toHaveText(/1\s*شحنة/);
     await expect(card.getByTestId("manifest-totals")).toHaveText(/6\s*كرتون/);
@@ -198,7 +196,7 @@ test.describe("Driver stop manifest", () => {
     await login(page, tenant.driverEmail);
     await page.goto(`/driver/trip/${trip.id}`);
 
-    const row = stopCard(page, unloadStop.id).getByTestId(`manifest-row-${short.shipmentNumber}`);
+    const row = (await stopCard(page, unloadStop.id)).getByTestId(`manifest-row-${short.shipmentNumber}`);
     await expect(row).toContainText("وصل 3 من 5 كراتين");
     await expect(row).toContainText("وصول جزئي");
 
@@ -217,7 +215,12 @@ test.describe("Driver stop manifest", () => {
     await login(page, tenant.driverEmail);
     await page.goto(`/driver/trip/${trip.id}`);
 
-    const cta = stopCard(page, loadStop.id).locator('button:has-text("تأكيد التحميل")');
+    const cta = (await stopCard(page, loadStop.id)).locator('button:has-text("تأكيد التحميل")');
+    // Measured only once it is on screen. boundingBox() resolves to null for an element that is
+    // not attached yet, so without this the assertion below reads a null under any load that
+    // delays first paint — a race the test carried from the start, and one that only ever showed
+    // up as a confusing "cannot read properties of null" rather than as a real layout failure.
+    await expect(cta).toBeVisible();
     const box = await cta.boundingBox();
     // 48px is the tap-target floor these driver buttons are built to (h-12) — a driver confirms
     // this wearing gloves at a loading dock.
@@ -230,7 +233,7 @@ test.describe("Driver stop manifest", () => {
 
     await cta.click();
     await expect(page.locator("text=تم تحميل 1 شحنة")).toBeVisible();
-    await expect(stopCard(page, loadStop.id).locator("text=اكتمل")).toBeVisible();
+    await expect((await stopCard(page, loadStop.id)).locator("text=اكتمل")).toBeVisible();
 
     await cleanupTenant(tenant.company.id);
   });
@@ -284,6 +287,81 @@ test.describe("Driver stop manifest", () => {
     await login(page, tenant.adminEmail);
     await page.goto(`/driver/trip/${trip.id}`);
     await expect(page).toHaveURL(/\/login/);
+
+    await cleanupTenant(tenant.company.id);
+  });
+});
+
+test.describe("Driver — leaving a stop, and losing signal", () => {
+  test("departing with work still on the ground asks first, and names what is being left", async ({ page }) => {
+    const { tenant, trip, origin, destination } = await tripWithStops();
+    const [loadStop, unloadStop] = trip.stops;
+    await addShipment({
+      companyId: tenant.company.id, customerId: tenant.customerId, origin: origin.id, destination: destination.id,
+      tripId: trip.id, loadStopId: loadStop.id, unloadStopId: unloadStop.id, cartonCount: 3,
+    });
+
+    await page.setViewportSize(MOBILE);
+    await login(page, tenant.driverEmail);
+    await page.goto(`/driver/trip/${trip.id}`);
+
+    const card = await stopCard(page, loadStop.id);
+    await card.locator('button:has-text("مغادرة المحطة")').click();
+
+    // Departing dispatches WhatsApp to customers and moves every onboard shipment to IN_TRANSIT.
+    // There is no undo, so the one tap that is probably a mistake — leaving with cargo still to
+    // handle here — is confirmed, and the dialog says exactly what is being left behind.
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toContainText("1 شحنة للتحميل");
+    expect((await prisma.tripStop.findUniqueOrThrow({ where: { id: loadStop.id } })).actualDeparture).toBeNull();
+
+    await dialog.locator('button:has-text("نعم، غادرت المحطة")').click();
+    const departed = await pollUntil(
+      () => prisma.tripStop.findUniqueOrThrow({ where: { id: loadStop.id } }),
+      (stop) => stop.actualDeparture !== null
+    );
+    expect(departed.status).toBe("DEPARTED");
+
+    await cleanupTenant(tenant.company.id);
+  });
+
+  test("a stop with nothing left to do departs on the first tap, with no dialog in the way", async ({ page }) => {
+    const { tenant, trip } = await tripWithStops();
+    const loadStop = trip.stops[0];
+
+    await page.setViewportSize(MOBILE);
+    await login(page, tenant.driverEmail);
+    await page.goto(`/driver/trip/${trip.id}`);
+
+    // A confirmation the driver always answers yes to is one they stop reading, so the normal case
+    // has none: nothing to load or unload here, so leaving is simply the next step.
+    await (await stopCard(page, loadStop.id)).locator('button:has-text("مغادرة المحطة")').click();
+    await pollUntil(
+      () => prisma.tripStop.findUniqueOrThrow({ where: { id: loadStop.id } }),
+      (stop) => stop.actualDeparture !== null
+    );
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+
+    await cleanupTenant(tenant.company.id);
+  });
+
+  test("losing the signal is stated on screen, and clears itself when it comes back", async ({ page }) => {
+    const { tenant, trip } = await tripWithStops();
+
+    await page.setViewportSize(MOBILE);
+    await login(page, tenant.driverEmail);
+    await page.goto(`/driver/trip/${trip.id}`);
+    await expect(page.getByTestId("driver-offline")).toHaveCount(0);
+
+    // The failure this screen actually meets: a truck between two cities. Without the banner a
+    // driver taps a confirm button, nothing happens, and the app is indistinguishable from broken.
+    await page.context().setOffline(true);
+    await expect(page.getByTestId("driver-offline")).toBeVisible();
+
+    await page.context().setOffline(false);
+    await expect(page.getByTestId("driver-offline")).toHaveCount(0);
+    // And the trip is re-read on the way back, so a screen that went stale offline is current again.
+    await expect(page.locator(`text=${trip.tripNumber}`).first()).toBeVisible();
 
     await cleanupTenant(tenant.company.id);
   });

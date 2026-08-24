@@ -270,7 +270,7 @@ test.describe("P1-9 — partial arrival alignment", () => {
     const { tenant, shipment } = await arrivedShipment("PARTIALLY_ARRIVED");
     await prisma.shipment.update({ where: { id: shipment.id }, data: { arrivedCartons: 2 } });
 
-    await page.goto(`/track/${shipment.trackingToken}`);
+    await page.goto(`/t/${shipment.trackingToken}`);
     await expect(page.locator("text=وصل 2 من أصل 3 كراتين").first()).toBeVisible();
     await expect(page.locator("text=يمكنك استلام ما وصل من الفرع").first()).toBeVisible();
 
@@ -289,7 +289,7 @@ test.describe("P1-9 — partial arrival alignment", () => {
   test("the customer can request home delivery for a shipment that arrived short", async ({ page }) => {
     const { tenant, shipment } = await arrivedShipment("PARTIALLY_ARRIVED");
 
-    await page.goto(`/track/${shipment.trackingToken}`);
+    await page.goto(`/t/${shipment.trackingToken}`);
     await page.click('button:has-text("توصيل للمنزل")');
     await page.fill('textarea[name="destinationAddress"]', "المكلا، حي السلام، شارع 12");
     await page.fill('input[name="last4"]', "4567");
@@ -308,7 +308,7 @@ test.describe("P1-9 — partial arrival alignment", () => {
   test("a shipment that has not arrived still cannot have its handover method changed", async ({ page }) => {
     const { tenant, shipment } = await arrivedShipment("IN_TRANSIT");
 
-    await page.goto(`/track/${shipment.trackingToken}`);
+    await page.goto(`/t/${shipment.trackingToken}`);
     // The choice is not even offered — the page mirrors the server rather than letting the customer
     // tap something that will be refused.
     await expect(page.locator('button:has-text("استلام من الفرع")')).toHaveCount(0);
@@ -320,7 +320,7 @@ test.describe("P1-9 — partial arrival alignment", () => {
   test("the last-4 credential is still required for a partially arrived shipment", async ({ page }) => {
     const { tenant, shipment } = await arrivedShipment("PARTIALLY_ARRIVED");
 
-    await page.goto(`/track/${shipment.trackingToken}`);
+    await page.goto(`/t/${shipment.trackingToken}`);
     await page.click('button:has-text("استلام من الفرع")');
     await page.fill('input[name="last4"]', "0000");
     await page.click('button:has-text("تأكيد")');
@@ -334,7 +334,7 @@ test.describe("P1-9 — partial arrival alignment", () => {
   test("direct URL access with a wrong token reveals nothing about a partial shipment", async ({ page }) => {
     const { tenant, shipment } = await arrivedShipment("PARTIALLY_ARRIVED");
 
-    await page.goto("/track/definitely-not-a-real-token");
+    await page.goto("/t/definitely-not-a-real-token");
     const body = await page.locator("body").innerText();
     expect(body).not.toContain(shipment.shipmentNumber);
     expect(body).not.toContain(tenant.company.name);

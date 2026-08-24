@@ -44,7 +44,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
           userSubtitle="مدير المنصة"
           mobileNav={<MobileSidebar brand="منصة الشحن البري" subBrand="لوحة إدارة المنصة" items={items} tone="platform" />}
         />
-        <main className="flex-1 overflow-y-auto bg-muted/30 p-4 md:p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6">{children}</main>
       </div>
     </div>
   );

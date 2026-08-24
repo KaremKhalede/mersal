@@ -45,25 +45,68 @@ export function StatCardsSkeleton({ count = 4 }: { count?: number }) {
   );
 }
 
+/** Header row + `rows` body rows, matching ui/table's spacing. Cardless so the responsive shell
+ *  below can place it beside a card list without nesting two Cards. */
+function TableRowsSkeleton({ rows, cols }: { rows: number; cols: number }) {
+  return (
+    <>
+      <div className="border-b px-4 py-3">
+        <div className="flex items-center gap-4">
+          {Array.from({ length: cols }).map((_, i) => (
+            <Skeleton key={i} className={cn("h-3.5", i === 0 ? "w-28" : "flex-1 max-w-24")} />
+          ))}
+        </div>
+      </div>
+      {Array.from({ length: rows }).map((_, r) => (
+        <div key={r} className="flex items-center gap-4 border-b px-4 py-3.5 last:border-0">
+          {Array.from({ length: cols }).map((_, c) => (
+            <Skeleton key={c} className={cn("h-4", c === 0 ? "w-28" : "flex-1 max-w-24")} />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
 /** A table shell with a header row and `rows` body rows, matching ui/table's spacing. */
 export function TableSkeleton({ rows = 6, cols = 5 }: { rows?: number; cols?: number }) {
   return (
     <Card>
       <CardContent className="p-0">
-        <div className="border-b px-4 py-3">
-          <div className="flex items-center gap-4">
-            {Array.from({ length: cols }).map((_, i) => (
-              <Skeleton key={i} className={cn("h-3.5", i === 0 ? "w-28" : "flex-1 max-w-24")} />
-            ))}
-          </div>
+        <TableRowsSkeleton rows={rows} cols={cols} />
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * For the two lists that swap shape at `lg`: shipments and trips render a card list below it and
+ * the table at and above it.
+ *
+ * The breakpoint here has to be the same `lg` those pages use. A skeleton that guesses the wrong
+ * shape is worse than none — the page visibly re-flows the moment content lands, which is exactly
+ * the jump these skeletons exist to prevent. The card body mirrors the real row: identifier and
+ * status badge on one line, then two lines of detail, all inside `p-3`.
+ */
+export function ResponsiveListSkeleton({ rows = 6, cols = 6 }: { rows?: number; cols?: number }) {
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="divide-y lg:hidden">
+          {Array.from({ length: rows }).map((_, i) => (
+            <div key={i} className="space-y-1 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <Skeleton className="h-5 w-36" />
+                <Skeleton className="h-5 w-20 rounded-4xl" />
+              </div>
+              <Skeleton className="h-5 w-28" />
+              <Skeleton className="h-4 w-48" />
+            </div>
+          ))}
         </div>
-        {Array.from({ length: rows }).map((_, r) => (
-          <div key={r} className="flex items-center gap-4 border-b px-4 py-3.5 last:border-0">
-            {Array.from({ length: cols }).map((_, c) => (
-              <Skeleton key={c} className={cn("h-4", c === 0 ? "w-28" : "flex-1 max-w-24")} />
-            ))}
-          </div>
-        ))}
+        <div className="hidden lg:block">
+          <TableRowsSkeleton rows={rows} cols={cols} />
+        </div>
       </CardContent>
     </Card>
   );
@@ -136,18 +179,21 @@ export function ListPageSkeleton({
   cols = 5,
   rows = 6,
   filters = 3,
+  responsive = false,
 }: {
   stats?: number;
   cols?: number;
   rows?: number;
   filters?: number;
+  /** Set for a list that becomes cards below `lg` — currently shipments and trips. */
+  responsive?: boolean;
 }) {
   return (
     <div className="space-y-4">
       <PageHeaderSkeleton />
       {stats > 0 && <StatCardsSkeleton count={stats} />}
       {filters > 0 && <FiltersSkeleton count={filters} />}
-      <TableSkeleton rows={rows} cols={cols} />
+      {responsive ? <ResponsiveListSkeleton rows={rows} cols={cols} /> : <TableSkeleton rows={rows} cols={cols} />}
     </div>
   );
 }

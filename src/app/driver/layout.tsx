@@ -1,6 +1,7 @@
 import { requireDriver } from "@/lib/auth";
 import { UserMenu } from "@/components/shell/user-menu";
 import { Package } from "lucide-react";
+import { ConnectionStatus } from "./connection-status";
 
 export default async function DriverLayout({ children }: { children: React.ReactNode }) {
   const user = await requireDriver();
@@ -14,7 +15,12 @@ export default async function DriverLayout({ children }: { children: React.React
           </div>
           <span className="font-semibold text-sm">تطبيق السائق</span>
         </div>
-        <UserMenu name={user.name} subtitle={user.company?.name} />
+        <div className="flex items-center gap-1">
+          {/* Connection first: in an installed (standalone) window there is no browser chrome, so
+              this row is the only place a refresh or a "you are offline" can live. */}
+          <ConnectionStatus />
+          <UserMenu name={user.name} subtitle={user.company?.name} />
+        </div>
       </header>
       <main className="flex-1 mx-auto w-full max-w-md p-4">{children}</main>
     </div>

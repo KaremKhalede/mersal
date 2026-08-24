@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { requireCompanyUser } from "@/lib/auth";
-import { findOrCreateCustomer, findCustomerByPhone, updateCustomer } from "@/modules/customers/service";
+import { findOrCreateCustomer, findCustomerByPhone, updateCustomer, listCustomers } from "@/modules/customers/service";
 import { assertCan } from "@/lib/rbac";
+import { getBranchScope } from "@/lib/branch-scope";
 import { phoneError } from "@/lib/phone";
 
 /** Never creates a second Customer row for a phone already on file within the company — the
@@ -63,4 +64,27 @@ export async function toggleCustomerStatusAction(customerId: string, status: "AC
   await updateCustomer(user.companyId!, customerId, { status });
   revalidatePath("/app/customers");
   revalidatePath(`/app/customers/${customerId}`);
+}
+
+/**
+ * Type-ahead lookup for the shipment intake dialog. Read-only, capped, and scoped exactly like the
+ * customers list — a branch employee never sees another branch's customers here either.
+ *
+ * Returns the *stored* phone (already normalized to E.164 by findOrCreateCustomer), which is what
+ * makes picking a customer collision-proof: the intake form submits that exact string, so
+ * findOrCreateCustomer matches the existing row instead of creating a near-duplicate.
+ */
+export async function searchCustomersAction(query: string) {
+  const user = await requireCompanyUser();
+  assertCan(user, "customers", "view");
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const { items } = await listCustomers({
+    companyId: user.companyId!,
+    search: q,
+    branchId: getBranchScope(user),
+    status: "ACTIVE",
+    pageSize: 6,
+  });
+  return items.map((c) => ({ id: c.id, name: c.name, phone: c.phone }));
 }

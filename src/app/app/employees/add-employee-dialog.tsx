@@ -27,32 +27,32 @@ export function AddEmployeeDialog({
       submitLabel="حفظ الموظف"
     >
       <div className="space-y-1.5">
-        <Label htmlFor="name">الاسم الكامل *</Label>
+        <Label htmlFor="name" required>الاسم الكامل</Label>
         <Input id="name" name="name" required />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor="email">البريد الإلكتروني *</Label>
+          <Label htmlFor="email" required>البريد الإلكتروني</Label>
           <Input id="email" name="email" type="email" dir="ltr" required />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="phone">رقم الجوال *</Label>
+          <Label htmlFor="phone" required>رقم الجوال</Label>
           <Input id="phone" name="phone" dir="ltr" required />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor="password">كلمة المرور *</Label>
+          <Label htmlFor="password" required>كلمة المرور</Label>
           <Input id="password" name="password" type="password" dir="ltr" required minLength={MIN_PASSWORD_LENGTH} />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="passwordConfirm">تأكيد كلمة المرور *</Label>
+          <Label htmlFor="passwordConfirm" required>تأكيد كلمة المرور</Label>
           <Input id="passwordConfirm" name="passwordConfirm" type="password" dir="ltr" required minLength={MIN_PASSWORD_LENGTH} />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label>نوع الحساب *</Label>
+          <Label required>نوع الحساب</Label>
           <Select name="userType" defaultValue="COMPANY_USER">
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -62,8 +62,8 @@ export function AddEmployeeDialog({
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label>الدور الوظيفي *</Label>
-          <Select name="roleId" required>
+          <Label required>الدور الوظيفي</Label>
+          <Select name="roleId">
             <SelectTrigger><SelectValue placeholder="اختر الدور" /></SelectTrigger>
             <SelectContent>
               {roles.map((r) => (

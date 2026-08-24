@@ -3,7 +3,7 @@ import { createTestTenant, createTestShipment, createBranchScopedUser, login, cl
 
 /** The redesigned "طباعة أكواد الكراتين" carton-print page (src/app/app/shipments/[id]/label). */
 test.describe("Scenario — carton print page", () => {
-  test("breadcrumb, heading, banner, and one QR + one decorative barcode per carton by default", async ({ page }) => {
+  test("breadcrumb, heading, banner, and one QR per carton — the decorative barcode is off by default", async ({ page }) => {
     const tenant = await createTestTenant(["الرياض", "المكلا"]);
     const [branchA, branchB] = tenant.branches;
     const shipment = await createTestShipment({ companyId: tenant.company.id, customerId: tenant.customerId, loadBranchId: branchA.id, unloadBranchId: branchB.id, cartonCount: 3 });
@@ -18,7 +18,11 @@ test.describe("Scenario — carton print page", () => {
     await expect(page.locator(`text=إجمالي الكراتين: 3 كرتون`)).toBeVisible();
 
     await expect(page.locator('[data-testid="carton-qr"]')).toHaveCount(3);
-    await expect(page.locator('[data-testid="carton-barcode"]')).toHaveCount(3);
+    // The barcode strip is explicitly decorative — no symbology, no checksum, and its own docstring
+    // says it "never claims to be scannable". It used to ship on by default, spending roughly a
+    // quarter of a 100x150mm label inviting someone to scan something that cannot answer. Off now,
+    // one click away for anyone who wants it.
+    await expect(page.locator('[data-testid="carton-barcode"]')).toHaveCount(0);
 
     await cleanupTenant(tenant.company.id);
   });
@@ -31,9 +35,11 @@ test.describe("Scenario — carton print page", () => {
     await login(page, tenant.adminEmail);
     await page.goto(`/app/shipments/${shipment.id}/label`);
 
+    // Barcode starts hidden — turning it on is the toggle worth proving now.
+    await expect(page.locator('[data-testid="carton-barcode"]')).toHaveCount(0);
     await page.getByRole("button", { name: "خيارات الطباعة" }).click();
     await page.getByRole("menuitemcheckbox", { name: "إظهار الباركود" }).click();
-    await expect(page.locator('[data-testid="carton-barcode"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="carton-barcode"]')).toHaveCount(2);
     await expect(page.locator('[data-testid="carton-qr"]')).toHaveCount(2); // QR untouched
 
     await page.getByRole("button", { name: "خيارات الطباعة" }).click();

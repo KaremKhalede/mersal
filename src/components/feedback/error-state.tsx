@@ -51,7 +51,7 @@ export function ErrorState({
       {/* Not a stack trace and not an explanation — a short reference an employee can read out to
           support, which is the only way a redacted production error is ever diagnosable. */}
       {error.digest && (
-        <p className="w-full pt-1 text-[11px] text-muted-foreground" dir="ltr">
+        <p className="w-full pt-1 text-2xs text-muted-foreground" dir="ltr">
           {error.digest}
         </p>
       )}

@@ -43,7 +43,7 @@ export function EditRoleForm({ role, userCount }: { role: { id: string; name: st
 
   return (
     <>
-      <form action={handleSubmit} className="grid md:grid-cols-2 gap-6">
+      <form action={handleSubmit} className="grid md:grid-cols-2 gap-4">
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="name">اسم الدور</Label>

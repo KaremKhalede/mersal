@@ -8,11 +8,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ActiveBadge } from "@/components/ui/status-badge";
 import { Pagination } from "@/components/ui/pagination";
-import { Users, UserRound } from "lucide-react";
+import { UserRound } from "lucide-react";
 import Link from "next/link";
 import { EmployeeFilters } from "./filters";
 import { AddEmployeeDialog } from "./add-employee-dialog";
 import { EmployeeRowActions } from "./employee-row-actions";
+import { PageHeader } from "@/components/shell/page-header";
+import { EmptyState, NoResults, TableEmpty } from "@/components/feedback/empty-state";
 
 const PAGE_SIZE = 10;
 
@@ -44,19 +46,11 @@ export default async function EmployeesPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Users className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold">الموظفون</h2>
-            <p className="text-sm text-muted-foreground">إدارة موظفي الشركة وحسابات الدخول والصلاحيات.</p>
-          </div>
-        </div>
-
-        {canCreate && <AddEmployeeDialog roles={roles} branches={branches} showBranchField={!ownScope} />}
-      </div>
+      <PageHeader
+        title="الموظفون"
+        description="إدارة موظفي الشركة وحسابات الدخول والصلاحيات."
+        actions={canCreate && <AddEmployeeDialog roles={roles} branches={branches} showBranchField={!ownScope} />}
+      />
 
       <EmployeeFilters roles={roles} branches={branches} roleId={sp.roleId} branchId={sp.branchId} status={sp.status} search={sp.q} showBranchFilter={!ownScope} />
 
@@ -79,7 +73,7 @@ export default async function EmployeesPage({
               {employees.map((e) => (
                 <TableRow key={e.id}>
                   <TableCell>
-                    <Link href={`/app/employees/${e.id}`} className="flex items-center gap-2.5">
+                    <Link href={`/app/employees/${e.id}`} className="flex items-center gap-2">
                       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
                         <UserRound className="h-4 w-4" />
                       </span>
@@ -108,9 +102,18 @@ export default async function EmployeesPage({
                 </TableRow>
               ))}
               {employees.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">لا يوجد موظفون مطابقون</TableCell>
-                </TableRow>
+                <TableEmpty colSpan={8}>
+                  {sp.q || sp.status || sp.roleId || sp.branchId ? (
+                    <NoResults resetHref="/app/employees" />
+                  ) : (
+                    <EmptyState
+                      icon={UserRound}
+                      title="لا يوجد موظفون بعد"
+                      description="أضف موظفاً وامنحه دوراً ليتمكن من الدخول إلى النظام."
+                      action={canCreate ? <AddEmployeeDialog roles={roles} branches={branches} showBranchField={!ownScope} /> : undefined}
+                    />
+                  )}
+                </TableEmpty>
               )}
             </TableBody>
           </Table>

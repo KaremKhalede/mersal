@@ -17,6 +17,9 @@ import { Plus, Building2, CheckCircle2, PauseCircle } from "lucide-react";
 import { formatBusinessDate, formatBusinessTime } from "@/lib/timezone";
 import { createCompanyAction } from "./actions";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
+import { StatCard } from "@/components/ui/stat-card";
+import { PageHeader } from "@/components/shell/page-header";
+import { formatYER } from "@/lib/money";
 
 /** "منذ N يوم" for recent activity, falling back to a date once it stops being useful. */
 function relativeActivity(date: Date | null) {
@@ -26,45 +29,6 @@ function relativeActivity(date: Date | null) {
   if (days === 1) return `أمس ${formatBusinessTime(date)}`;
   if (days < 30) return `منذ ${days} يوماً`;
   return formatBusinessDate(date);
-}
-
-function StatChip({
-  label,
-  value,
-  share,
-  icon: Icon,
-  tone,
-  dot,
-  delay,
-}: {
-  label: string;
-  value: number;
-  share?: string;
-  icon?: React.ComponentType<{ className?: string }>;
-  tone: string;
-  dot?: string;
-  delay: number;
-}) {
-  return (
-    <div
-      style={{ animationDelay: `${delay}ms` }}
-      className="animate-in rounded-xl border bg-card p-4 shadow-sm fade-in slide-in-from-bottom-3 duration-500 transition-all [animation-fill-mode:backwards] hover:-translate-y-0.5 hover:shadow-md motion-reduce:animate-none motion-reduce:hover:translate-y-0"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          {dot && <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />}
-          {label}
-        </p>
-        {Icon && (
-          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tone}`}>
-            <Icon className="h-4.5 w-4.5" />
-          </span>
-        )}
-      </div>
-      <p className="mt-2 text-2xl font-bold leading-none tabular-nums">{value.toLocaleString("en-US")}</p>
-      {share && <p className="mt-1.5 text-[11px] font-medium text-muted-foreground tabular-nums">{share}</p>}
-    </div>
-  );
 }
 
 export default async function PlatformCompaniesPage({
@@ -100,54 +64,60 @@ export default async function PlatformCompaniesPage({
 
   return (
     <div className="space-y-4">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight">الشركات</h1>
-          <p className="text-sm text-muted-foreground">إدارة جميع الشركات المشتركة في المنصة</p>
-        </div>
-        {canManage && <FormDialog
+      <PageHeader
+        title="الشركات"
+        description="إدارة جميع الشركات المشتركة في المنصة"
+        actions={canManage && <FormDialog
           trigger={<Button><Plus className="h-4 w-4" /> إضافة شركة جديدة</Button>}
           title="إضافة شركة شحن جديدة"
           description="سيتم إنشاء حساب مدير الشركة تلقائياً"
           action={createCompanyAction}
         >
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5"><Label htmlFor="name">اسم الشركة</Label><Input id="name" name="name" required /></div>
             <div className="space-y-1.5"><Label htmlFor="slug">المعرف (بالإنجليزية)</Label><Input id="slug" name="slug" dir="ltr" required /></div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5"><Label htmlFor="phone">الهاتف</Label><Input id="phone" name="phone" dir="ltr" /></div>
             <div className="space-y-1.5"><Label htmlFor="email">البريد الإلكتروني</Label><Input id="email" name="email" dir="ltr" /></div>
           </div>
           <div className="space-y-1.5"><Label htmlFor="adminName">اسم مدير الشركة</Label><Input id="adminName" name="adminName" required /></div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5"><Label htmlFor="adminEmail">بريد المدير</Label><Input id="adminEmail" name="adminEmail" type="email" dir="ltr" required /></div>
             <div className="space-y-1.5"><Label htmlFor="adminPassword">كلمة المرور</Label><Input id="adminPassword" name="adminPassword" type="password" dir="ltr" required minLength={MIN_PASSWORD_LENGTH} /></div>
           </div>
         </FormDialog>}
-      </header>
+      />
 
       <CompaniesToolbar search={search} status={status} period={period} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatChip label="إجمالي الشركات" value={counts.total} icon={Building2} tone="bg-primary/10 text-primary" delay={0} />
-        <StatChip
+        <StatCard label="إجمالي الشركات" value={counts.total} icon={Building2} tone="primary" />
+        <StatCard
           label="نشطة"
           value={counts.active}
-          dot="bg-success"
           icon={CheckCircle2}
-          tone="bg-success/15 text-success"
-          share={counts.total ? `${Math.round((counts.active / counts.total) * 100)}% من الإجمالي` : undefined}
-          delay={60}
+          tone="success"
+          footer={
+            counts.total ? (
+              <p className="text-2xs text-muted-foreground tabular-nums">
+                {Math.round((counts.active / counts.total) * 100)}% من الإجمالي
+              </p>
+            ) : null
+          }
         />
-        <StatChip
+        <StatCard
           label="متوقفة"
           value={counts.suspended}
-          dot="bg-warning"
           icon={PauseCircle}
-          tone="bg-warning/15 text-warning"
-          share={counts.total ? `${Math.round((counts.suspended / counts.total) * 100)}% من الإجمالي` : undefined}
-          delay={120}
+          tone="warning"
+          footer={
+            counts.total ? (
+              <p className="text-2xs text-muted-foreground tabular-nums">
+                {Math.round((counts.suspended / counts.total) * 100)}% من الإجمالي
+              </p>
+            ) : null
+          }
         />
       </div>
 
@@ -172,7 +142,7 @@ export default async function PlatformCompaniesPage({
                   {items.map((c) => (
                     <TableRow key={c.id} className="transition-colors hover:bg-muted/40">
                       <TableCell>
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex items-center gap-2">
                           <span
                             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white"
                             style={{ backgroundColor: c.logoColor }}
@@ -184,13 +154,13 @@ export default async function PlatformCompaniesPage({
                             <Link href={`/platform/companies/${c.id}`} className="block truncate font-medium hover:text-primary hover:underline">
                               {c.name}
                             </Link>
-                            <span className="block truncate text-[11px] text-muted-foreground" dir="ltr">{c.slug}</span>
+                            <span className="block truncate text-2xs text-muted-foreground" dir="ltr">{c.slug}</span>
                           </span>
                         </div>
                       </TableCell>
                       <TableCell>
                         <span className="text-xs">استخدام</span>
-                        <span className="block text-[11px] text-muted-foreground tabular-nums">{feePerCarton} ر.ي / كرتون</span>
+                        <span className="block text-2xs text-muted-foreground tabular-nums">{formatYER(feePerCarton)} / كرتون</span>
                       </TableCell>
                       <TableCell>
                         <Badge

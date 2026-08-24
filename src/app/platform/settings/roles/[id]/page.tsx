@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requirePlatformAdmin } from "@/lib/auth";
 import { requireCanPlatform, platformPermissionsOf } from "@/lib/rbac";
@@ -13,8 +12,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChevronLeft, ChevronRight, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { RoleForm } from "./role-form";
+import { PageHeader } from "@/components/shell/page-header";
 
 export default async function PlatformRoleEditPage({ params }: { params: Promise<{ id: string }> }) {
   const me = await requirePlatformAdmin();
@@ -41,29 +41,21 @@ export default async function PlatformRoleEditPage({ params }: { params: Promise
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <nav aria-label="breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-          <Link href="/platform/settings" className="hover:text-foreground">إعدادات المنصة</Link>
-          <ChevronLeft className="h-3.5 w-3.5" />
-          <span className="font-medium text-foreground">{role.name}</span>
-        </nav>
-        <Link
-          href="/platform/settings"
-          className="inline-flex items-center gap-1 rounded-lg border bg-card px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <ChevronRight className="h-4 w-4" /> رجوع إلى الإعدادات
-        </Link>
-      </div>
-
-      <header className="flex flex-wrap items-center gap-2">
-        <h1 className="text-2xl font-bold tracking-tight">{role.name}</h1>
-        {role.isSuperAdmin && (
-          <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
-            <ShieldCheck className="me-1 h-3 w-3" /> صلاحية كاملة
-          </Badge>
-        )}
-        {role.isSystem && <Badge variant="outline" className="bg-muted text-muted-foreground">دور نظامي</Badge>}
-      </header>
+      <PageHeader
+        variant="record"
+        title={role.name}
+        badge={
+          <>
+            {role.isSuperAdmin && (
+              <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
+                <ShieldCheck className="me-1 h-3 w-3" /> صلاحية كاملة
+              </Badge>
+            )}
+            {role.isSystem && <Badge variant="outline" className="bg-muted text-muted-foreground">دور نظامي</Badge>}
+          </>
+        }
+        parent={{ label: "إعدادات المنصة", href: "/platform/settings" }}
+      />
 
       {role.isSuperAdmin ? (
         <Card>

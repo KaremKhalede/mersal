@@ -151,6 +151,176 @@ export async function autoAssignShipmentToTrip(tripId: string, shipmentId: strin
   return link;
 }
 
+/**
+ * ---------------------------------------------------------------------------------------------
+ * TRIP COMMAND — the three writes a trip has always been missing
+ * ---------------------------------------------------------------------------------------------
+ * `Trip.driverId` was written in exactly one place in the entire product (createTrip) and never
+ * again. A trip planned before the crew was decided could therefore never be executed: no driver
+ * meant no /driver screen, and no screen anywhere could attach one. A sick driver, a broken truck
+ * or a mistyped plate had the same single remedy — build the trip again and lose its links.
+ *
+ * `CANCELLED` had the same hole from the other side: it is in TRIP_STATUSES and has a colour in the
+ * trips table, and nothing in the product could ever set it. A trip created by mistake stayed
+ * PLANNED forever — and since the driver app resolves the oldest planned trip when nothing is in
+ * progress, a piece of junk from last week could sit in front of a driver's real work.
+ *
+ * These three functions close it, using columns that already exist. No schema, no migration.
+ */
+
+/** Who and what is already committed elsewhere, so the office can see a clash before making one.
+ *
+ * Nothing here blocks a double booking — a real dispatcher sometimes does hand one driver two trips
+ * in a day, and a product that refuses is a product they work around. It states the fact and lets a
+ * person decide, which is the difference between a guard rail and a locked door. */
+export async function activeCrewAssignments(companyId: string, excludeTripId?: string) {
+  const trips = await prisma.trip.findMany({
+    where: {
+      companyId,
+      status: { in: ["PLANNED", "IN_PROGRESS"] },
+      ...(excludeTripId ? { id: { not: excludeTripId } } : {}),
+    },
+    select: { tripNumber: true, driverId: true, vehicleId: true },
+  });
+
+  const drivers: Record<string, string> = {};
+  const vehicles: Record<string, string> = {};
+  for (const t of trips) {
+    if (t.driverId && !drivers[t.driverId]) drivers[t.driverId] = t.tripNumber;
+    if (t.vehicleId && !vehicles[t.vehicleId]) vehicles[t.vehicleId] = t.tripNumber;
+  }
+  return { drivers, vehicles };
+}
+
+/** Sets (or clears) the trip's driver and vehicle. Null means "unassign", which is a real dispatch
+ *  state — a trip waiting for whoever turns up — not an error. */
+export async function assignTripCrew(params: {
+  companyId: string;
+  tripId: string;
+  driverId: string | null;
+  vehicleId: string | null;
+  userId?: string;
+  branchScope?: string | null;
+}) {
+  const trip = await assertTripInCompany(params.companyId, params.tripId, params.branchScope);
+  if (trip.status === "COMPLETED") throw new Error("الرحلة منتهية — لا يمكن تغيير طاقمها");
+  if (trip.status === "CANCELLED") throw new Error("الرحلة ملغاة — لا يمكن تغيير طاقمها");
+
+  // Both checked against the company, not just for existence: an id from another tenant must not
+  // become this trip's driver, and `userType` keeps an office employee out of the driver app.
+  if (params.driverId) {
+    const driver = await prisma.user.findFirst({
+      // `status`, not isActive: User carries ACTIVE | DISABLED. A disabled account cannot log in,
+      // so assigning a trip to one is assigning it to nobody.
+      where: { id: params.driverId, companyId: params.companyId, userType: "DRIVER", status: "ACTIVE" },
+    });
+    if (!driver) throw new Error("سائق غير صالح");
+  }
+  if (params.vehicleId) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: params.vehicleId, companyId: params.companyId, isActive: true },
+    });
+    if (!vehicle) throw new Error("مركبة غير صالحة");
+  }
+
+  await prisma.trip.update({
+    where: { id: params.tripId },
+    data: { driverId: params.driverId, vehicleId: params.vehicleId },
+  });
+
+  await logAudit({
+    companyId: params.companyId,
+    userId: params.userId,
+    action: "ASSIGN_CREW",
+    entityType: "Trip",
+    entityId: params.tripId,
+    metadata: {
+      driverId: params.driverId,
+      vehicleId: params.vehicleId,
+      previousDriverId: trip.driverId,
+      previousVehicleId: trip.vehicleId,
+    },
+  });
+}
+
+/**
+ * Calls off a trip that has not happened.
+ *
+ * Only before it physically starts: one carton loaded, or one stop departed, and cancelling would
+ * be a claim about the past rather than a plan change — the cargo moved, the customers were told,
+ * and the record has to keep saying so. Those trips end through completeTrip like any other.
+ *
+ * The shipment links are deleted rather than kept as history. A link is not a record of something
+ * that happened here (nothing happened — that is the precondition); it is a reservation, and
+ * leaving it in place is what strands the shipment: autoAssignShipmentToTrip refuses a shipment
+ * already committed elsewhere, so a cancelled trip would hold its cargo hostage forever.
+ *
+ * Shipment statuses are deliberately left where they are. Linking may have moved a shipment to
+ * READY_FOR_LOADING, and that is still true of boxes sitting at their origin branch waiting for a
+ * truck — reversing it would be the lie, not keeping it.
+ */
+export async function cancelTrip(companyId: string, tripId: string, userId?: string, branchScope?: string | null) {
+  await assertTripInCompany(companyId, tripId, branchScope);
+
+  const released = await prisma.$transaction(async (tx) => {
+    const trip = await tx.trip.findUniqueOrThrow({ where: { id: tripId }, select: { status: true } });
+    if (trip.status === "COMPLETED") throw new Error("الرحلة منتهية — لا يمكن إلغاؤها");
+    if (trip.status === "CANCELLED") throw new Error("الرحلة ملغاة بالفعل");
+
+    const loaded = await tx.tripShipmentStop.count({ where: { tripId, loadedAt: { not: null } } });
+    if (loaded > 0) throw new Error("بدأ تحميل شحنات على هذه الرحلة — لا يمكن إلغاؤها");
+
+    const moved = await tx.tripStop.count({ where: { tripId, status: { in: ["DEPARTED", "DONE"] } } });
+    if (moved > 0) throw new Error("الرحلة انطلقت فعلاً — لا يمكن إلغاؤها");
+
+    const { count } = await tx.tripShipmentStop.deleteMany({ where: { tripId } });
+    await tx.trip.update({ where: { id: tripId }, data: { status: "CANCELLED" } });
+    return count;
+  });
+
+  await logAudit({
+    companyId,
+    userId,
+    action: "CANCEL",
+    entityType: "Trip",
+    entityId: tripId,
+    metadata: { releasedShipments: released },
+  });
+  return { releasedShipments: released };
+}
+
+/** Takes one shipment back off a trip — the undo for a wrong pick in the assign dialog.
+ *
+ *  Only while it is still a plan: once `loadedAt` is set the boxes are on the truck, and a screen in
+ *  an office is not where that gets undone. */
+export async function unassignShipmentFromTrip(params: {
+  companyId: string;
+  tripId: string;
+  linkId: string;
+  userId?: string;
+  branchScope?: string | null;
+}) {
+  await assertTripInCompany(params.companyId, params.tripId, params.branchScope);
+
+  const link = await prisma.tripShipmentStop.findFirst({
+    where: { id: params.linkId, tripId: params.tripId },
+    include: { trip: { select: { status: true } }, shipment: { select: { shipmentNumber: true } } },
+  });
+  if (!link) throw new Error("الشحنة ليست ضمن هذه الرحلة");
+  if (link.trip.status === "COMPLETED") throw new Error("الرحلة منتهية — لا يمكن تعديل حمولتها");
+  if (link.loadedAt) throw new Error("الشحنة محمّلة على الشاحنة — لا يمكن إزالتها من الرحلة");
+
+  await prisma.tripShipmentStop.delete({ where: { id: params.linkId } });
+  await logAudit({
+    companyId: params.companyId,
+    userId: params.userId,
+    action: "UNASSIGN_SHIPMENT",
+    entityType: "Trip",
+    entityId: params.tripId,
+    metadata: { shipmentId: link.shipmentId, shipmentNumber: link.shipment.shipmentNumber },
+  });
+}
+
 export async function getTripDetail(companyId: string, tripId: string, branchId?: string | null) {
   return prisma.trip.findFirst({
     where: { id: tripId, companyId, ...(branchId ? { stops: { some: { branchId } } } : {}) },
@@ -183,6 +353,42 @@ export async function getTripDetail(companyId: string, tripId: string, branchId?
       },
     },
   });
+}
+
+/**
+ * What this driver has been assigned, split into the one they are driving and the ones that come
+ * after it.
+ *
+ * Replaces a `findFirst` on PLANNED|IN_PROGRESS ordered by `createdAt: "desc"`, which was wrong in a
+ * way that only shows up in real dispatch: nothing stops the office from assigning a driver their
+ * next trip while the current one is still on the road, and "newest created" then resolved to
+ * *tomorrow's* trip. A driver halfway through a run would open the app and find their trip replaced
+ * by one that has not started — no stops confirmed, no way back to the one they were actually on.
+ *
+ * The rule here is what a person would say: the trip that has already started is the trip you are
+ * on. Only when none has started does the oldest planned one come up, because that is the next one
+ * to do — not the most recently typed into the office computer.
+ *
+ * One query for both answers: the driver's assigned trips are a handful of rows, and the screen
+ * needs the tail of the list anyway to tell them what is waiting after this.
+ */
+export async function getDriverTrips(driverId: string) {
+  const trips = await prisma.trip.findMany({
+    where: { driverId, status: { in: ["PLANNED", "IN_PROGRESS"] } },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      tripNumber: true,
+      status: true,
+      stops: {
+        orderBy: { sequence: "asc" },
+        select: { branch: { select: { name: true } }, plannedArrival: true },
+      },
+    },
+  });
+
+  const active = trips.find((t) => t.status === "IN_PROGRESS") ?? trips[0] ?? null;
+  return { active, upcoming: trips.filter((t) => t.id !== active?.id) };
 }
 
 /** Every carton across every shipment linked to this trip, for one-click bulk label printing —
@@ -290,6 +496,35 @@ export async function listTrips(
     page,
     pageSize,
     pageCount: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
+
+/**
+ * One driver's trips, newest first — the answer to "how much has this driver been running".
+ *
+ * Company-scoped in the WHERE, never checked afterwards, same as every other read here. Kept
+ * small on purpose: the employee page shows a driver's recent work, not a second trips list with
+ * its own filters and pagination. If someone needs the full history they are on /app/trips.
+ */
+export async function listTripsForDriver(companyId: string, driverId: string, take = 10) {
+  const trips = await prisma.trip.findMany({
+    where: { companyId, driverId },
+    include: {
+      stops: { orderBy: { sequence: "asc" }, include: { branch: { select: { name: true } } } },
+      vehicle: { select: { plateNumber: true } },
+      shipmentLinks: { select: { shipment: { select: { totalCartons: true } } } },
+    },
+    orderBy: { createdAt: "desc" },
+    take,
+  });
+  const total = await prisma.trip.count({ where: { companyId, driverId } });
+  return {
+    total,
+    items: trips.map(({ shipmentLinks, ...t }) => ({
+      ...t,
+      shipmentCount: shipmentLinks.length,
+      cartonCount: shipmentLinks.reduce((sum, l) => sum + l.shipment.totalCartons, 0),
+    })),
   };
 }
 
@@ -576,6 +811,60 @@ export async function reportPartialArrival(shipmentId: string, missingCartonIds:
 }
 
 /** Trip departs a stop: shipments just loaded here move to IN_TRANSIT; shipments still onboard get a pass-through tracking entry. */
+/**
+ * "The truck is here." Stamps `TripStop.actualArrival` and moves the stop to ARRIVED.
+ *
+ * The column, the status value and three readers of both already existed — `stopTiming`, the trip
+ * page's per-stop badge and the dashboard's active-trip row — but nothing in the product ever
+ * wrote either one. The office was reading a lateness signal computed against a field that was
+ * null on every row in the database (see src/lib/stop-timing.ts for what that did to the badge).
+ *
+ * One function, two callers: the driver standing at the branch, and the office employee who
+ * receives the truck. Both routes are the same physical event and must record the same fact —
+ * putting the write behind one service function is what keeps a driver-recorded arrival and an
+ * office-recorded arrival from ever meaning two different things.
+ *
+ * The claim is idempotent by WHERE, not by a read-then-write: `actualArrival: null` in the filter
+ * means a second tap — the normal outcome of a slow connection in a truck — matches zero rows and
+ * silently keeps the first, true timestamp instead of rewriting it to a later one.
+ *
+ * Deliberately no side effects beyond the stamp: no shipment transition, no tracking event, no
+ * WhatsApp. Arrival at a stop is not a change in any shipment's status (the cargo is still on the
+ * truck until it is unloaded, which has its own action), and the customer already hears about the
+ * stop when the trip leaves it. Trip.status is left alone too — `departStop` owns the
+ * PLANNED -> IN_PROGRESS move, and a truck sitting at its origin branch has not set off yet.
+ */
+export async function arriveAtStop(tripId: string, stopId: string, userId?: string) {
+  const companyId = await prisma.$transaction(async (tx) => {
+    await assertTripOpen(tx, tripId);
+
+    // A truck can only be at one place, and this timestamp is now the input to the office's
+    // lateness signal — so it may only be recorded for the stop the trip has actually reached.
+    // Without this, a driver looking at the whole route on one screen could stamp an arrival at
+    // stop 3 while standing at stop 1, and the number every other screen trusts would be fiction.
+    //
+    // "Reached" is the same rule the driver app, the trip page and the dashboard already use to
+    // decide which stop is current: the first one not yet departed. Enforcing it here rather than
+    // only hiding the button means a stale page cannot post its way past it either.
+    const stop = await tx.tripStop.findFirstOrThrow({ where: { id: stopId, tripId }, select: { sequence: true } });
+    const earlierUnfinished = await tx.tripStop.count({
+      where: { tripId, sequence: { lt: stop.sequence }, status: { notIn: ["DEPARTED", "DONE"] } },
+    });
+    if (earlierUnfinished > 0) throw new Error("لم تغادر المحطة السابقة بعد");
+
+    const claim = await tx.tripStop.updateMany({
+      where: { id: stopId, tripId, actualArrival: null, status: { notIn: ["DEPARTED", "DONE"] } },
+      data: { status: "ARRIVED", actualArrival: new Date() },
+    });
+    if (claim.count === 0) return null;
+    const trip = await tx.trip.findUniqueOrThrow({ where: { id: tripId }, select: { companyId: true } });
+    return trip.companyId;
+  });
+
+  if (companyId) await logAudit({ companyId, userId, action: "ARRIVE_STOP", entityType: "TripStop", entityId: stopId });
+  return { recorded: companyId !== null };
+}
+
 export async function departStop(tripId: string, stopId: string, userId?: string) {
   const pendingEvents: { shipmentId: string; event: ShipmentEvent; trackingEventId: string }[] = [];
 

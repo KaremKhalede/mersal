@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FormDialog } from "@/components/shell/form-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MoreVertical, Eye, Pencil, Ban, CheckCircle2 } from "lucide-react";
 import { VEHICLE_TYPES, VEHICLE_TYPE_LABELS } from "@/lib/enums";
@@ -32,19 +33,6 @@ export function VehicleRowActions({ vehicle, canEdit, canDisable }: { vehicle: V
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "حدث خطأ غير متوقع");
       }
-    });
-  }
-
-  function handleEditSubmit(formData: FormData) {
-    startTransition(async () => {
-      const result = await updateVehicleAction(vehicle.id, formData);
-      if (result?.error) {
-        toast.error(result.error);
-        return;
-      }
-      setEditOpen(false);
-      router.refresh();
-      toast.success("تم حفظ التعديلات");
     });
   }
 
@@ -76,6 +64,7 @@ export function VehicleRowActions({ vehicle, canEdit, canDisable }: { vehicle: V
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {/* Stays a plain Dialog: a yes/no confirmation, not a form — there is no input to preserve. */}
       <Dialog open={confirmDisableOpen} onOpenChange={setConfirmDisableOpen}>
         <DialogContent>
           <DialogHeader>
@@ -99,37 +88,35 @@ export function VehicleRowActions({ vehicle, canEdit, canDisable }: { vehicle: V
         </DialogContent>
       </Dialog>
 
+      {/* Controlled: opened from a menu item, so the dialog cannot own a nested trigger. */}
       {canEdit && (
-        <Dialog open={editOpen} onOpenChange={setEditOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>تعديل المركبة</DialogTitle></DialogHeader>
-            <form action={handleEditSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor={`plateNumber-${vehicle.id}`}>رقم اللوحة</Label>
-                <Input id={`plateNumber-${vehicle.id}`} name="plateNumber" dir="ltr" defaultValue={vehicle.plateNumber} required />
-              </div>
-              <div className="space-y-1.5">
-                <Label>نوع المركبة</Label>
-                <Select name="type" defaultValue={vehicle.type ?? undefined}>
-                  <SelectTrigger className="w-full"><SelectValue placeholder="اختر النوع" /></SelectTrigger>
-                  <SelectContent>
-                    {VEHICLE_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>{VEHICLE_TYPE_LABELS[t]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={`notes-${vehicle.id}`}>ملاحظات (اختياري)</Label>
-                <Textarea id={`notes-${vehicle.id}`} name="notes" rows={2} defaultValue={vehicle.notes ?? ""} />
-              </div>
-              <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>إلغاء</Button>
-                <Button type="submit" disabled={pending}>{pending ? "جارٍ الحفظ..." : "حفظ"}</Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <FormDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          title="تعديل المركبة"
+          successMessage="تم حفظ التعديلات"
+          action={(formData) => updateVehicleAction(vehicle.id, formData)}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor={`plateNumber-${vehicle.id}`}>رقم اللوحة</Label>
+            <Input id={`plateNumber-${vehicle.id}`} name="plateNumber" dir="ltr" defaultValue={vehicle.plateNumber} required />
+          </div>
+          <div className="space-y-1.5">
+            <Label>نوع المركبة</Label>
+            <Select name="type" defaultValue={vehicle.type ?? undefined}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="اختر النوع" /></SelectTrigger>
+              <SelectContent>
+                {VEHICLE_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>{VEHICLE_TYPE_LABELS[t]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`notes-${vehicle.id}`}>ملاحظات (اختياري)</Label>
+            <Textarea id={`notes-${vehicle.id}`} name="notes" rows={2} defaultValue={vehicle.notes ?? ""} />
+          </div>
+        </FormDialog>
       )}
     </>
   );

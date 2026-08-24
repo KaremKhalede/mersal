@@ -53,7 +53,7 @@ export function StatusDonut({ total, segments }: { total: number; segments: { ke
               })}
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <p className="text-3xl font-bold">{total.toLocaleString()}</p>
+          <p className="text-2xl font-bold">{total.toLocaleString()}</p>
           <p className="text-xs text-muted-foreground">إجمالي الشحنات</p>
         </div>
       </div>

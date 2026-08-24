@@ -1,6 +1,16 @@
 import { ShipmentStatusBadge } from "@/components/ui/status-badge";
 import { Boxes, CheckCircle2, Circle, PackageOpen, PackageCheck } from "lucide-react";
 
+/**
+ * The statuses worth a badge on a driver's phone: the ones that change what happens at the counter.
+ *
+ * Every row used to carry one, so a normal loading list repeated "جاهزة للتحميل" down the screen —
+ * a label restating the heading above it ("للتحميل هنا") once per shipment. What a driver actually
+ * has to notice is the shipment that is NOT normal, and a badge on every row is the surest way to
+ * make the one that matters invisible.
+ */
+const NOTABLE_STATUSES = new Set(["PARTIALLY_ARRIVED", "EXCEPTION", "CANCELLED"]);
+
 export type ManifestRow = {
   id: string;
   shipmentNumber: string;
@@ -73,12 +83,15 @@ export function StopManifest({ kind, rows }: { kind: "LOAD" | "UNLOAD"; rows: Ma
                 <p className="text-sm font-medium text-warning">وصل {row.arrivedCartons} من {row.totalCartons} كراتين</p>
               )}
             </div>
-            <ShipmentStatusBadge status={row.status} />
+            {NOTABLE_STATUSES.has(row.status) && <ShipmentStatusBadge status={row.status} />}
           </li>
         ))}
       </ul>
 
-      {pending.length > 0 && (
+      {/* Only once part of the list is done. Before the first confirmation "المتبقي" is the same two
+          numbers as the totals in the header, three lines above it — the driver reads a second line
+          to learn nothing. It earns its place the moment the two figures diverge. */}
+      {pending.length > 0 && done.length > 0 && (
         <p data-testid="manifest-remaining" className="border-t p-3 text-sm text-muted-foreground">
           المتبقي: {pending.length} شحنة · {pendingCartons} كرتون
         </p>

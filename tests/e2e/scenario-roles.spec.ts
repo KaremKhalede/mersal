@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { prisma, createTestTenant, createBranchScopedUser, createTestShipment, login, TEST_PASSWORD, cleanupTenant, expectNotFound } from "./helpers";
+import { prisma, createTestTenant, createBranchScopedUser, createTestShipment, login, TEST_PASSWORD, cleanupTenant, expectNotFound, visibleText } from "./helpers";
 import bcrypt from "bcryptjs";
 import { updateRole, deleteRole } from "../../src/modules/roles/service";
 
@@ -25,7 +25,7 @@ test.describe("Roles & permissions page", () => {
 
     await login(page, tenant.adminEmail);
     await page.goto("/app/roles");
-    await expect(page.locator("h2", { hasText: "الأدوار والصلاحيات" })).toBeVisible();
+    await expect(page.locator("h1", { hasText: "الأدوار والصلاحيات" })).toBeVisible();
     const rows = page.locator("tr", { hasText: "دور مشترك اختباري" });
     await expect(rows).toHaveCount(1); // one row per role, never one per user
     await expect(rows.locator("td").nth(2)).toHaveText("2");
@@ -224,8 +224,8 @@ test.describe("Roles & permissions page", () => {
     const employee = await createBranchScopedUser({ companyId: tenant.company.id, branchId: branchA.id, permissions: { shipments: ["view"] } });
     await login(page, employee.email);
     await page.goto("/app/shipments");
-    await expect(page.locator(`text=${shipmentAtA.shipmentNumber}`)).toBeVisible();
-    await expect(page.locator(`text=${shipmentAtB.shipmentNumber}`)).not.toBeVisible(); // role.permissions has no branch dimension — branch-scope still restricts
+    await expect(visibleText(page, shipmentAtA.shipmentNumber)).toBeVisible();
+    await expect(visibleText(page, shipmentAtB.shipmentNumber)).toHaveCount(0); // role.permissions has no branch dimension — branch-scope still restricts
 
     await cleanupTenant(tenant.company.id);
   });

@@ -15,7 +15,7 @@ test.describe("Employees page", () => {
     await login(page, tenant.adminEmail);
     await page.goto("/app/employees");
 
-    await expect(page.locator("h2", { hasText: "الموظفون" })).toBeVisible();
+    await expect(page.locator("h1", { hasText: "الموظفون" })).toBeVisible();
     const adminRow = page.locator("tr", { hasText: "مدير اختبار" });
     await expect(adminRow).toBeVisible();
     await expect(adminRow.locator("text=نشط")).toBeVisible();

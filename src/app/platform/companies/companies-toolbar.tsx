@@ -55,7 +55,7 @@ export function CompaniesToolbar({
     >
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.6fr_1fr_1fr_auto_auto]">
         <div className="space-y-1.5">
-          <label htmlFor="q" className="text-[11px] font-medium text-muted-foreground">البحث</label>
+          <label htmlFor="q" className="text-2xs font-medium text-muted-foreground">البحث</label>
           <div className="relative">
             <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input id="q" name="q" defaultValue={search} placeholder="ابحث عن اسم الشركة..." className="h-9 pe-9" />
@@ -63,7 +63,7 @@ export function CompaniesToolbar({
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="status" className="text-[11px] font-medium text-muted-foreground">الحالة</label>
+          <label htmlFor="status" className="text-2xs font-medium text-muted-foreground">الحالة</label>
           <select id="status" name="status" defaultValue={status} className={selectClass}>
             {STATUS_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
@@ -72,7 +72,7 @@ export function CompaniesToolbar({
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="period" className="text-[11px] font-medium text-muted-foreground">فترة التسجيل</label>
+          <label htmlFor="period" className="text-2xs font-medium text-muted-foreground">فترة التسجيل</label>
           <select id="period" name="period" defaultValue={period} className={selectClass}>
             {PERIOD_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>

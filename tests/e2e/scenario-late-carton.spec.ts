@@ -323,7 +323,7 @@ test.describe("Late carton — screens", () => {
     const { tenant, shipment, missing } = await deliveredShort(5, [3]);
     await confirmLateCartons(tenant.company.id, shipment.id, [missing[0].id]);
 
-    await page.goto(`/track/${shipment.trackingToken}`);
+    await page.goto(`/t/${shipment.trackingToken}`);
     await expect(page.locator("text=وصل كرتون متأخر").first()).toBeVisible();
 
     await cleanupTenant(tenant.company.id);

@@ -1,5 +1,5 @@
 import { requireCompanyUser } from "@/lib/auth";
-import { requireCan } from "@/lib/rbac";
+import { requireCan, can } from "@/lib/rbac";
 import { getShipmentDetail, getExceptionReporter, getExceptionRecoveryOptions } from "@/modules/shipments/service";
 import { getBranchScope } from "@/lib/branch-scope";
 import { notFound } from "next/navigation";
@@ -7,15 +7,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ShipmentStatusBadge, CartonStatusBadge } from "@/components/ui/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { Phone, AlertTriangle, User, ChevronRight } from "lucide-react";
 import Link from "next/link";
+import { Phone, AlertTriangle, User, ArrowLeft } from "lucide-react";
 import { ShipmentActions } from "./shipment-actions";
 import { ResolveExceptionButton } from "./resolve-exception-button";
 import { DocumentsPanel } from "@/app/app/documents/documents-panel";
 import { CustomsPanel } from "@/app/app/customs/customs-panel";
 import { DeliveryPanel } from "@/app/app/delivery/delivery-panel";
-import { formatBusinessDateTime, formatBusinessStamp } from "@/lib/timezone";
+import { formatBusinessDateTime, formatDate, formatDateStamp } from "@/lib/timezone";
+import { formatPhoneDisplay } from "@/lib/phone";
 import { EXCEPTION_TYPE_LABELS, SHIPMENT_STATUS_LABELS, DELIVERY_CHANNEL_LABELS, type ExceptionType, type ShipmentStatus, type DeliveryChannel } from "@/lib/enums";
+import { PageHeader } from "@/components/shell/page-header";
+import { formatYER } from "@/lib/money";
+import { cn, routeLabel } from "@/lib/utils";
 
 export default async function ShipmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireCompanyUser();
@@ -34,27 +38,54 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
   // Derived on the server from the status recorded when the exception was raised, so the buttons
   // can only ever offer moves resolveException will accept.
   const recoveryOptions = isException ? await getExceptionRecoveryOptions(shipment.id) : [];
+  // The permission recordPaymentAction itself enforces — checked here only to decide whether the
+  // handover flow offers to collect, never as the gate. The action re-checks it either way.
+  const canRecordPayment = can(user, "shipments", "edit");
 
   return (
     <div className="space-y-4">
-      <Link href="/app/shipments" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ChevronRight className="h-4 w-4" /> رجوع إلى الشحنات
-      </Link>
+      <PageHeader
+        variant="record"
+        title={shipment.shipmentNumber}
+        description={routeLabel(shipment.loadBranch.name, shipment.unloadBranch.name)}
+        badge={<ShipmentStatusBadge status={shipment.status} />}
+        parent={{ label: "الشحنات", href: "/app/shipments" }}
+        actions={
+          isException ? (
+            <ResolveExceptionButton shipmentId={shipment.id} options={recoveryOptions} />
+          ) : (
+            <ShipmentActions shipment={shipment} canRecordPayment={canRecordPayment} />
+          )
+        }
+      />
 
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-bold">{shipment.shipmentNumber}</h2>
-            <ShipmentStatusBadge status={shipment.status} />
-          </div>
-          <p className="text-muted-foreground mt-1">{shipment.loadBranch.name} ← {shipment.unloadBranch.name}</p>
-        </div>
-        {isException ? (
-          <ResolveExceptionButton shipmentId={shipment.id} options={recoveryOptions} />
-        ) : (
-          <ShipmentActions shipment={shipment} />
-        )}
-      </div>
+      {/*
+        The three questions this page is opened to answer, on one line, above everything else.
+        They were all present before — as rows 11, 12 and 2 of a flat thirteen-row list in the
+        sidebar, where "المتبقي: 33,000 ر.ي" carried exactly the same weight as "نوع البضاعة: —".
+        Staff do not read this page, they scan it for these three, so they get stated once at
+        a glance and once again in the record below.
+
+        Same shape as the dashboard's "ملخص مالي" strip (grid + divide-x-reverse, label under
+        value) rather than a new pattern — and deliberately not StatCard, which is a dashboard
+        figure with an icon tile and is far too loud for a per-record fact.
+      */}
+      <Card>
+        <CardContent className="grid grid-cols-3 divide-x divide-x-reverse text-center">
+          <Fact label="الموقع الحالي" value={shipment.currentBranch?.name ?? "في الطريق"} />
+          {/* Same numerator/denominator the list and the cartons tab use, so the three agree. */}
+          <Fact label="الكراتين" value={`${shipment.arrivedCartons} / ${shipment.totalCartons}`} ltr />
+          <Fact
+            label="المتبقي على العميل"
+            // "—" not "0" when no price has been agreed yet — the same distinction the list makes,
+            // and the reason those shipments never match the unpaid filter.
+            value={shipment.shippingPrice != null ? formatYER(Math.max(0, shipment.shippingPrice - shipment.amountPaid)) : "—"}
+            // Warning only when something is actually owed. A settled shipment stating a calm "0"
+            // is information; a settled shipment stating an orange "0" is a false alarm.
+            tone={shipment.shippingPrice != null && shipment.shippingPrice - shipment.amountPaid > 0 ? "warning" : undefined}
+          />
+        </CardContent>
+      </Card>
 
       {/* Reported problem, front and center — not buried in the info sidebar — so anyone opening
           this shipment immediately sees what's wrong, who flagged it, and where it happened. */}
@@ -107,7 +138,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
                       <div>
                         <p className="text-sm font-medium">{ev.title}</p>
                         {ev.description && <p className="text-xs text-muted-foreground">{ev.description}</p>}
-                        <p className="text-xs text-muted-foreground">{formatBusinessStamp(ev.createdAt)}</p>
+                        <p className="text-xs text-muted-foreground">{formatDateStamp(ev.createdAt)}</p>
                       </div>
                     </li>
                   ))}
@@ -117,7 +148,8 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
                 {/* Customs/border status is just another tracking milestone, not a separate module —
                     every status change here writes a TrackingEvent, so it shows in the list above too. */}
                 <div className="border-t pt-4">
-                  <p className="text-xs font-medium text-muted-foreground mb-2">الحالة الجمركية</p>
+                  {/* CustomsPanel labels its own field "الحالة الجمركية" — a heading above it saying
+                      the same words twice was two identical labels stacked. */}
                   <CustomsPanel shipmentId={shipment.id} customsCase={shipment.customsCase} />
                 </div>
               </TabsContent>
@@ -147,49 +179,80 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
                 </div>
               </TabsContent>
 
-              <TabsContent value="documents" className="p-4">
+              <TabsContent value="documents" className="p-4 space-y-3">
                 <DocumentsPanel companyId={user.companyId!} shipmentId={shipment.id} documents={shipment.documents} />
+                {/* The company-wide archive left the sidebar — it is an index of attachments, not a
+                    destination anyone sets out for. This is where someone thinking about documents
+                    already is, so it is where the way to all of them belongs. */}
+                {can(user, "documents", "view") && (
+                  <Link href="/app/documents" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                    عرض كل مستندات الشركة <ArrowLeft className="h-3 w-3" />
+                  </Link>
+                )}
               </TabsContent>
 
               <TabsContent value="delivery" className="p-4">
-                <DeliveryPanel shipment={shipment} />
+                <DeliveryPanel shipment={shipment} canRecordPayment={canRecordPayment} />
               </TabsContent>
             </Tabs>
           </CardContent>
         </Card>
 
-        <div className="space-y-4">
+        {/*
+          order-first below lg: on a phone this column used to sit under the whole tabs card — the
+          timeline, then the customs panel — so the customer's phone number, the receiver and the
+          balance were the last things on the page. They are what someone standing at the counter
+          with the customer in front of them actually needs, so on a phone they come first and the
+          timeline (the least urgent thing here) follows. On lg the two-column layout is unchanged.
+        */}
+        <div className="order-first space-y-4 lg:order-none">
           <Card>
             <CardHeader><CardTitle className="text-base">معلومات الشحنة</CardTitle></CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <InfoRow label="العميل" value={shipment.customer.name} />
-              <InfoRow label="جوال العميل" value={shipment.customer.phone} dir="ltr" icon={<Phone className="h-3.5 w-3.5" />} />
-              <InfoRow label="المستلم" value={shipment.receiverName} />
-              <InfoRow label="جوال المستلم" value={shipment.receiverPhone} dir="ltr" />
+            {/*
+              Grouped, not flattened. Every row that was here is still here and in the same order —
+              what changed is that the thirteen of them are now three labelled groups instead of one
+              undifferentiated column broken by two anonymous rules, so the eye can jump to "المالية"
+              instead of reading down to find it.
+            */}
+            <CardContent className="space-y-4 text-sm">
+              <Section title="الأطراف">
+                <InfoRow label="العميل" value={shipment.customer.name} />
+                <InfoRow label="جوال العميل" value={formatPhoneDisplay(shipment.customer.phone)} dir="ltr" icon={<Phone className="h-3.5 w-3.5" />} />
+                <InfoRow label="المستلم" value={shipment.receiverName} />
+                <InfoRow label="جوال المستلم" value={formatPhoneDisplay(shipment.receiverPhone)} dir="ltr" />
+              </Section>
               <Separator />
-              <InfoRow label="عدد الكراتين" value={String(shipment.totalCartons)} />
-              <InfoRow label="الكراتين الواصلة" value={String(shipment.arrivedCartons)} />
-              <InfoRow label="نوع البضاعة" value={shipment.goodsType ?? "—"} />
-              <InfoRow label="الوزن" value={shipment.weightKg ? `${shipment.weightKg} كجم` : "—"} />
+              <Section title="الشحنة">
+                <InfoRow label="عدد الكراتين" value={String(shipment.totalCartons)} />
+                <InfoRow label="الكراتين الواصلة" value={String(shipment.arrivedCartons)} />
+                <InfoRow label="نوع البضاعة" value={shipment.goodsType ?? "—"} />
+                <InfoRow label="الوزن" value={shipment.weightKg ? `${shipment.weightKg} كجم` : "—"} />
+              </Section>
               <Separator />
-              {/* toLocaleString, like every other money figure in the app — a bare template literal
-                  printed "12500 ر.ي" next to the billing page's "12,500 ر.ي". */}
-              <InfoRow label="أجرة الشحن" value={shipment.shippingPrice != null ? `${shipment.shippingPrice.toLocaleString("en-US")} ر.ي` : "—"} />
-              <InfoRow label="المبلغ المدفوع" value={`${shipment.amountPaid.toLocaleString("en-US")} ر.ي`} />
-              <InfoRow
-                label="المتبقي"
-                value={
-                  shipment.shippingPrice != null
-                    ? `${Math.max(0, shipment.shippingPrice - shipment.amountPaid).toLocaleString("en-US")} ر.ي`
-                    : "—"
-                }
-              />
+              <Section title="المالية">
+                {/* toLocaleString, like every other money figure in the app — a bare template literal
+                    printed "12500 ر.ي" next to the billing page's "12,500 ر.ي". */}
+                <InfoRow label="أجرة الشحن" value={shipment.shippingPrice != null ? `${formatYER(shipment.shippingPrice)}` : "—"} />
+                <InfoRow label="المبلغ المدفوع" value={`${formatYER(shipment.amountPaid)}`} />
+                {/* The one figure in this card that is a running obligation rather than a record of
+                    what happened, so it is the one that carries colour — the same warning tone the
+                    list column and the strip above already use for it. */}
+                <InfoRow
+                  label="المتبقي"
+                  tone={shipment.shippingPrice != null && shipment.shippingPrice - shipment.amountPaid > 0 ? "warning" : undefined}
+                  value={
+                    shipment.shippingPrice != null
+                      ? `${formatYER(Math.max(0, shipment.shippingPrice - shipment.amountPaid))}`
+                      : "—"
+                  }
+                />
+              </Section>
               {/* The dispute record. Shown only once a handover actually happened — an empty
                   "delivered to: —" block on every in-transit shipment would be noise. */}
               {shipment.deliveredAt && (
                 <>
                   <Separator />
-                  <p className="text-xs font-semibold text-success">إثبات التسليم</p>
+                  <Section title="إثبات التسليم" tone="success">
                   <InfoRow label="استلمها" value={shipment.deliveredToName ?? "—"} />
                   <InfoRow label="تحقق آخر 4 أرقام" value={shipment.deliveredToLast4 ?? "—"} dir="ltr" />
                   <InfoRow
@@ -198,7 +261,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
                   />
                   <InfoRow
                     label="وقت التسليم"
-                    value={formatBusinessDateTime(shipment.deliveredAt, { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    value={formatDateStamp(shipment.deliveredAt)}
                   />
                   {/* Derived from the cartons, not stored: a shipment handed over short is exactly a
                       delivered shipment that still has MISSING cartons, so there is nothing extra to
@@ -220,14 +283,19 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
                     />
                   ))}
                   {shipment.deliveryNote && <InfoRow label="ملاحظة التسليم" value={shipment.deliveryNote} />}
+                  </Section>
                 </>
               )}
               <Separator />
-              <InfoRow label="الموقع الحالي" value={shipment.currentBranch?.name ?? "في الطريق"} />
-              <InfoRow
-                label="تاريخ الإنشاء"
-                value={formatBusinessDateTime(shipment.createdAt, { year: "numeric", month: "long", day: "numeric" })}
-              />
+              {/* Both restated deliberately: the strip above is the glance, this is the record, and
+                  the location is one of the three facts worth saying twice. */}
+              <Section title="التتبع">
+                <InfoRow label="الموقع الحالي" value={shipment.currentBranch?.name ?? "في الطريق"} />
+                <InfoRow
+                  label="تاريخ الإنشاء"
+                  value={formatDate(shipment.createdAt)}
+                />
+              </Section>
             </CardContent>
           </Card>
         </div>
@@ -236,11 +304,39 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
   );
 }
 
-function InfoRow({ label, value, dir, icon }: { label: string; value: string; dir?: string; icon?: React.ReactNode }) {
+/** One cell of the facts strip. Local to this page on purpose — one use is not an abstraction, and
+ *  the moment a second page wants it, that is when it earns being extracted. */
+function Fact({ label, value, tone, ltr }: { label: string; value: string; tone?: "warning"; ltr?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium flex items-center gap-1" dir={dir}>{icon}{value}</span>
+    <div className="min-w-0 px-2">
+      <p className={cn("truncate text-base font-bold", tone === "warning" && "text-warning")} dir={ltr ? "ltr" : undefined}>
+        {value}
+      </p>
+      <p className="mt-0.5 text-xs text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+/** A titled group of InfoRows. Same small muted heading the customs section and the delivery-proof
+ *  block already use, so the card reads as one thing rather than three treatments. */
+function Section({ title, tone, children }: { title: string; tone?: "success"; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2.5">
+      <p className={cn("text-xs font-semibold", tone === "success" ? "text-success" : "text-muted-foreground")}>{title}</p>
+      {children}
+    </div>
+  );
+}
+
+function InfoRow({ label, value, dir, icon, tone }: { label: string; value: string; dir?: string; icon?: React.ReactNode; tone?: "warning" }) {
+  return (
+    // items-start + min-w-0: a long value ("3 كرتون — SH-1-01، SH-1-02، SH-1-03") used to push the
+    // label out of the row instead of wrapping under itself in a ~370px column.
+    <div className="flex items-start justify-between gap-3">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className={cn("flex min-w-0 items-center gap-1 text-end font-medium", tone === "warning" && "text-warning")} dir={dir}>
+        {icon}{value}
+      </span>
     </div>
   );
 }

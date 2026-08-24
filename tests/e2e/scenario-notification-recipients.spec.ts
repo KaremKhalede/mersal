@@ -45,7 +45,7 @@ test.describe("Notification recipients — sender vs receiver routing", () => {
     expect(logs[0].status).toBe("SENT");
     // The pickup-or-delivery call to action and its tracking link must land with the person who
     // actually has to choose — that is the whole reason this event is receiver-routed.
-    expect(logs[0].message).toContain(`/track/${shipment.trackingToken}`);
+    expect(logs[0].message).toContain(`/t/${shipment.trackingToken}`);
 
     await cleanupTenant(tenant.company.id);
   });

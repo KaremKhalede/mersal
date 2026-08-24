@@ -31,7 +31,7 @@ export function MobileSidebar({
       <Button
         variant="ghost"
         size="icon"
-        className="md:hidden shrink-0"
+        className="lg:hidden shrink-0"
         aria-label="فتح القائمة"
         onClick={() => setOpen(true)}
       >

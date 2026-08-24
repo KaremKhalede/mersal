@@ -16,12 +16,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Pagination } from "@/components/ui/pagination";
 import { MonthPicker } from "@/components/platform/month-picker";
-import { monthOptions, monthValue, parseMonth, MONTH_NAMES } from "@/components/platform/month-options";
+import { monthOptions, monthValue, parseMonth } from "@/components/platform/month-options";
 import { BillingToolbar } from "./billing-toolbar";
-import { Package, Receipt, Wallet, CircleAlert, TrendingUp, TrendingDown, CalendarRange, Building2, Info, ChevronLeft } from "lucide-react";
+import { Package, Receipt, Wallet, CircleAlert, TrendingUp, TrendingDown, Building2, Info, ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { StatCard } from "@/components/ui/stat-card";
+import { PageHeader } from "@/components/shell/page-header";
+import { formatAmount, formatYER } from "@/lib/money";
 
-const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (n: number) => formatAmount(n, 2);
 const int = (n: number) => n.toLocaleString("en-US");
 
 const STATUS_STYLES: Record<PaymentStatus, string> = {
@@ -29,43 +32,6 @@ const STATUS_STYLES: Record<PaymentStatus, string> = {
   PARTIAL: "border-warning/30 bg-warning/15 text-warning",
   UNPAID: "border-destructive/30 bg-destructive/10 text-destructive",
 };
-
-function KpiCard({
-  label,
-  value,
-  unit,
-  icon: Icon,
-  tone,
-  footer,
-  delay,
-}: {
-  label: string;
-  value: string;
-  unit: string;
-  icon: React.ComponentType<{ className?: string }>;
-  tone: string;
-  footer: React.ReactNode;
-  delay: number;
-}) {
-  return (
-    <div
-      style={{ animationDelay: `${delay}ms` }}
-      className="animate-in rounded-xl border bg-card p-4 shadow-sm fade-in slide-in-from-bottom-3 duration-500 transition-all [animation-fill-mode:backwards] hover:-translate-y-0.5 hover:shadow-md motion-reduce:animate-none motion-reduce:hover:translate-y-0"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-1 text-2xl font-bold leading-none tabular-nums">{value}</p>
-          <p className="mt-1 text-[11px] text-muted-foreground">{unit}</p>
-        </div>
-        <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", tone)}>
-          <Icon className="h-5 w-5" />
-        </span>
-      </div>
-      <div className="mt-3">{footer}</div>
-    </div>
-  );
-}
 
 /** Collection bar — built inline rather than with ui/progress, whose Radix indicator translates on
  *  the X axis and therefore fills from the wrong edge under RTL. */
@@ -107,9 +73,6 @@ export default async function PlatformBillingPage({
   const page = Math.max(Number(sp.page) || 1, 1);
   const pageSize = Number(sp.pageSize) || 10;
 
-  const monthEnd = new Date(selected.getFullYear(), selected.getMonth() + 1, 0);
-  const range = `01 - ${monthEnd.getDate()} ${MONTH_NAMES[selected.getMonth()]} ${selected.getFullYear()}`;
-
   const [totals, companies, pending] = await Promise.all([
     platformBillingTotals(selected),
     platformBillingByCompany({ month: selected, search, status, page, pageSize }),
@@ -139,40 +102,34 @@ export default async function PlatformBillingPage({
 
   return (
     <div className="space-y-4">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1.5">
-          <h1 className="text-2xl font-bold tracking-tight">الفوترة</h1>
-          <p className="text-sm text-muted-foreground">متابعة فواتير الشركات والمبالغ المستحقة والمدفوعات</p>
-          <p className="inline-flex items-center gap-1.5 rounded-full bg-primary/5 px-2.5 py-1 text-[11px] font-medium text-primary">
-            <Info className="h-3 w-3 shrink-0" />
-            سعر الاستخدام: {money(totals.feePerCarton)} ر.ي / كرتون
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <MonthPicker months={months} value={selectedValue} basePath="/platform/billing" />
-          {/* Derived from the picked month rather than a second control that could disagree with it. */}
-          <span className="inline-flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground">
-            <CalendarRange className="h-4 w-4 shrink-0" />
-            {range}
-          </span>
-        </div>
-      </header>
+      <PageHeader
+        title="الفوترة"
+        description="متابعة فواتير الشركات والمبالغ المستحقة والمدفوعات"
+        actions={
+          <>
+            <p className="inline-flex items-center gap-1.5 rounded-full bg-primary/5 px-2.5 py-1 text-2xs font-medium text-primary">
+              <Info className="h-3 w-3 shrink-0" />
+              سعر الاستخدام: {formatYER(totals.feePerCarton, 2)} / كرتون
+            </p>
+            <MonthPicker months={months} value={selectedValue} basePath="/platform/billing" />
+          </>
+        }
+      />
 
       {canPlatform(me, "billing", "reviewPayment") && <PendingReviews rows={pendingRows} />}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
+        <StatCard
           label="إجمالي الكراتين"
           value={int(totals.cartons)}
           unit="كرتون"
           icon={Package}
-          tone="bg-success/15 text-success"
-          delay={0}
+          tone="success"
           footer={
             totals.cartonsChange === null ? (
-              <p className="text-[11px] text-muted-foreground">لا توجد بيانات للمقارنة</p>
+              <p className="text-2xs text-muted-foreground">لا توجد بيانات للمقارنة</p>
             ) : (
-              <p className={cn("flex items-center gap-1 text-[11px] font-medium", totals.cartonsChange >= 0 ? "text-success" : "text-destructive")}>
+              <p className={cn("flex items-center gap-1 text-2xs font-medium", totals.cartonsChange >= 0 ? "text-success" : "text-destructive")}>
                 {totals.cartonsChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                 <span className="tabular-nums">{totals.cartonsChange >= 0 ? "+" : ""}{totals.cartonsChange}%</span>
                 <span className="text-muted-foreground">عن الشهر الماضي</span>
@@ -180,42 +137,39 @@ export default async function PlatformBillingPage({
             )
           }
         />
-        <KpiCard
+        <StatCard
           label="إجمالي المستحق"
           value={money(totals.due)}
           unit="ر.ي"
           icon={Receipt}
-          tone="bg-warning/15 text-warning"
-          delay={60}
+          tone="warning"
           footer={
-            <p className="text-[11px] text-muted-foreground tabular-nums">
-              {int(totals.cartons)} كرتون × {money(totals.feePerCarton)} ر.ي
+            <p className="text-2xs text-muted-foreground tabular-nums">
+              {int(totals.cartons)} كرتون × {formatYER(totals.feePerCarton, 2)}
             </p>
           }
         />
-        <KpiCard
+        <StatCard
           label="تم التحصيل"
           value={money(totals.collected)}
           unit="ر.ي"
           icon={Wallet}
-          tone="bg-primary/10 text-primary"
-          delay={120}
+          tone="primary"
           footer={
-            <p className="text-[11px] font-medium text-primary">
+            <p className="text-2xs font-medium text-primary">
               <span className="tabular-nums">{totals.rate}%</span>{" "}
               <span className="text-muted-foreground">من إجمالي المستحق</span>
             </p>
           }
         />
-        <KpiCard
+        <StatCard
           label="المتبقي"
           value={money(totals.remaining)}
           unit="ر.ي"
           icon={CircleAlert}
-          tone="bg-destructive/10 text-destructive"
-          delay={180}
+          tone="destructive"
           footer={
-            <p className="text-[11px] font-medium text-destructive">
+            <p className="text-2xs font-medium text-destructive">
               <span className="tabular-nums">{100 - totals.rate}%</span>{" "}
               <span className="text-muted-foreground">من إجمالي المستحق</span>
             </p>
@@ -255,7 +209,7 @@ export default async function PlatformBillingPage({
                   {companies.items.map((r) => (
                     <TableRow key={r.id} className="transition-colors hover:bg-muted/40">
                       <TableCell>
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex items-center gap-2">
                           <span
                             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white"
                             style={{ backgroundColor: r.logoColor }}
@@ -265,7 +219,7 @@ export default async function PlatformBillingPage({
                           </span>
                           <span className="min-w-0">
                             <span className="block truncate font-medium">{r.name}</span>
-                            <span className="block truncate text-[11px] text-muted-foreground" dir="ltr">{r.slug}</span>
+                            <span className="block truncate text-2xs text-muted-foreground" dir="ltr">{r.slug}</span>
                           </span>
                         </div>
                       </TableCell>

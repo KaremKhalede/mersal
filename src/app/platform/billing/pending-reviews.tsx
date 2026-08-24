@@ -6,15 +6,9 @@ import { FileText, Check, X, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { FormDialog } from "@/components/shell/form-dialog";
 import { confirmPaymentAction, rejectPaymentAction } from "./review-actions";
+import { formatYER } from "@/lib/money";
 
 export type PendingRow = {
   id: string;
@@ -34,15 +28,12 @@ export type PendingRow = {
   paidAt: string | null;
 };
 
-const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
 /**
  * The review queue: "هل هذا الإثبات صحيح؟". Confirming appends the SETTLEMENT ledger row; rejecting
  * writes nothing to the ledger and returns a reason to the company.
  */
 export function PendingReviews({ rows }: { rows: PendingRow[] }) {
   const [confirming, startConfirm] = useTransition();
-  const [rejecting, startReject] = useTransition();
   const [rejectTarget, setRejectTarget] = useState<PendingRow | null>(null);
 
   // Run the actions from form handlers rather than reacting to action state in an effect, so the
@@ -55,18 +46,6 @@ export function PendingReviews({ rows }: { rows: PendingRow[] }) {
     });
   }
 
-  function rejectAction(formData: FormData) {
-    startReject(async () => {
-      const r = await rejectPaymentAction({}, formData);
-      if (r.error) {
-        toast.error(r.error);
-        return;
-      }
-      if (r.success) toast.success(r.success);
-      setRejectTarget(null);
-    });
-  }
-
   if (rows.length === 0) return null;
 
   return (
@@ -74,7 +53,7 @@ export function PendingReviews({ rows }: { rows: PendingRow[] }) {
       <h2 className="mb-3 flex items-center gap-2 text-sm font-bold">
         <Clock className="h-4 w-4 text-warning" />
         دفعات بانتظار المراجعة
-        <span className="rounded-full bg-warning/20 px-2 py-0.5 text-[11px] tabular-nums text-warning">{rows.length}</span>
+        <span className="rounded-full bg-warning/20 px-2 py-0.5 text-2xs tabular-nums text-warning">{rows.length}</span>
       </h2>
 
       <ul className="space-y-2">
@@ -90,20 +69,20 @@ export function PendingReviews({ rows }: { rows: PendingRow[] }) {
 
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{r.companyName}</p>
-              <p className="truncate text-[11px] text-muted-foreground">
-                <span dir="ltr">{r.invoiceNumber}</span> · إجمالي الفاتورة {money(r.invoiceTotal)} ر.ي · {r.createdAt}
+              <p className="truncate text-2xs text-muted-foreground">
+                <span dir="ltr">{r.invoiceNumber}</span> · إجمالي الفاتورة {formatYER(r.invoiceTotal, 2)} · {r.createdAt}
               </p>
             </div>
 
             {/* Claimed vs still owed, side by side — the reviewer's actual question. */}
             <div className="text-sm">
-              <p className="font-bold tabular-nums">{money(r.amount)} ر.ي</p>
-              <p className="text-[11px] text-muted-foreground tabular-nums">
-                المتبقي على الفاتورة {money(r.invoiceRemaining)} ر.ي
+              <p className="font-bold tabular-nums">{formatYER(r.amount, 2)}</p>
+              <p className="text-2xs text-muted-foreground tabular-nums">
+                المتبقي على الفاتورة {formatYER(r.invoiceRemaining, 2)}
               </p>
             </div>
 
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-2xs text-muted-foreground">
               <p>{r.methodLabel}{r.reference ? ` · ${r.reference}` : ""}</p>
               <p>{r.paidAt ? `دُفعت في ${r.paidAt}` : `أُبلغ في ${r.createdAt}`}</p>
               {r.amount > r.invoiceRemaining && (
@@ -118,7 +97,7 @@ export function PendingReviews({ rows }: { rows: PendingRow[] }) {
                 </a>
               </Button>
             ) : (
-              <span className="text-[11px] text-muted-foreground">بدون إثبات</span>
+              <span className="text-2xs text-muted-foreground">بدون إثبات</span>
             )}
 
             <form action={confirmAction}>
@@ -128,35 +107,33 @@ export function PendingReviews({ rows }: { rows: PendingRow[] }) {
               </Button>
             </form>
 
-            <Button variant="outline" size="sm" onClick={() => setRejectTarget(r)} disabled={rejecting}>
+            <Button variant="outline" size="sm" onClick={() => setRejectTarget(r)}>
               <X className="h-4 w-4" /> رفض
             </Button>
           </li>
         ))}
       </ul>
 
-      <Dialog open={rejectTarget !== null} onOpenChange={(o) => !o && setRejectTarget(null)}>
-        <DialogContent>
-          <form action={rejectAction} className="space-y-4">
-            <input type="hidden" name="submissionId" value={rejectTarget?.id ?? ""} />
-            <DialogHeader>
-              <DialogTitle>رفض الدفعة</DialogTitle>
-              <DialogDescription>
-                {rejectTarget ? `${rejectTarget.companyName} — ${money(rejectTarget.amount)} ر.ي` : ""}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-1.5">
-              <Label htmlFor="reason">سبب الرفض</Label>
-              <Input id="reason" name="reason" required placeholder="يظهر للشركة" />
-            </div>
-            <DialogFooter>
-              <Button type="submit" variant="destructive" disabled={rejecting}>
-                {rejecting ? "جارٍ الرفض..." : "تأكيد الرفض"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* Controlled: opened from a per-row button that lives outside this dialog. FormDialog (not a
+          hand-rolled <form action>) because the rejection reason is required — a rejected reject
+          used to clear the very text the reviewer had just written. */}
+      <FormDialog
+        open={rejectTarget !== null}
+        onOpenChange={(o) => !o && setRejectTarget(null)}
+        title="رفض الدفعة"
+        description={rejectTarget ? `${rejectTarget.companyName} — ${formatYER(rejectTarget.amount, 2)}` : ""}
+        submitLabel="تأكيد الرفض"
+        submitVariant="destructive"
+        successMessage="تم رفض الدفعة"
+        action={(formData) => rejectPaymentAction({}, formData)}
+      >
+        <input type="hidden" name="submissionId" value={rejectTarget?.id ?? ""} />
+        <div className="space-y-1.5">
+          <Label htmlFor="reason">سبب الرفض</Label>
+          <Input id="reason" name="reason" required placeholder="يظهر للشركة" />
+        </div>
+      </FormDialog>
+
     </section>
   );
 }

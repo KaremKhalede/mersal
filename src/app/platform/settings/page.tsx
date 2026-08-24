@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { FormDialog } from "@/components/shell/form-dialog";
 import Link from "next/link";
 import { Plus, ShieldCheck, ChevronLeft } from "lucide-react";
+import { PageHeader } from "@/components/shell/page-header";
 
 export default async function PlatformSettingsPage() {
   const me = await requirePlatformAdmin();
@@ -30,7 +31,7 @@ export default async function PlatformSettingsPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">إعدادات المنصة</h2>
+      <PageHeader title="إعدادات المنصة" description="إعدادات تسري على كل الشركات المشتركة" />
       <Card className="max-w-xl">
         <CardHeader><CardTitle className="text-base">الإعدادات العامة</CardTitle></CardHeader>
         <CardContent>
@@ -38,6 +39,10 @@ export default async function PlatformSettingsPage() {
             name={platform.name}
             feePerCartonYER={toMoney(platform.feePerCartonYER)}
             whatsappSenderName={platform.whatsappSenderName}
+            supportPhone={platform.supportPhone}
+            supportWhatsapp={platform.supportWhatsapp}
+            supportEmail={platform.supportEmail}
+            supportHours={platform.supportHours}
             canManage={canManage}
           />
         </CardContent>
@@ -89,7 +94,7 @@ export default async function PlatformSettingsPage() {
                         {r.isSuperAdmin && <ShieldCheck className="h-4 w-4 shrink-0 text-primary" />}
                         {r.name}
                       </span>
-                      {r.description && <span className="block text-[11px] text-muted-foreground">{r.description}</span>}
+                      {r.description && <span className="block text-2xs text-muted-foreground">{r.description}</span>}
                     </TableCell>
                     <TableCell className="tabular-nums">{r.userCount}</TableCell>
                     <TableCell>

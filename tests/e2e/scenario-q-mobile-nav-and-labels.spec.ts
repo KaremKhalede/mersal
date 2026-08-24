@@ -4,12 +4,12 @@ import { prisma, createTestTenant, createTestShipment, createTestPlatformAdmin, 
 test.describe("Scenario Q — mobile navigation and Arabic status/type labels (Phase 5 P0)", () => {
   test("company sidebar is reachable on a phone-sized viewport via the hamburger drawer", async ({ page }) => {
     const tenant = await createTestTenant();
-    await page.setViewportSize({ width: 390, height: 844 }); // iPhone-class width, below the md breakpoint
+    await page.setViewportSize({ width: 390, height: 844 }); // iPhone-class width, below the lg breakpoint
 
     await login(page, tenant.adminEmail);
     await expect(page).toHaveURL(/\/app$/);
 
-    // The desktop <aside> is `hidden md:flex` — at this viewport it must not be occupying space.
+    // The desktop <aside> is `hidden lg:flex` — at this viewport it must not be occupying space.
     await expect(page.locator("aside")).not.toBeVisible();
 
     const trigger = page.getByRole("button", { name: "فتح القائمة" });
@@ -105,7 +105,9 @@ test.describe("Scenario Q — mobile navigation and Arabic status/type labels (P
 
     await login(page, tenant.adminEmail);
     await page.goto("/app/delivery");
-    await expect(page.locator("text=قيد التوصيل")).toBeVisible();
+    // Scoped to the row: the queue now also has a "قيد التوصيل" counter above the table, and this
+    // assertion is about the status badge on the request, not the count of them.
+    await expect(page.locator("tbody").getByText("قيد التوصيل")).toBeVisible();
     await expect(page.locator("text=OUT_FOR_DELIVERY")).toHaveCount(0);
 
     await cleanupTenant(tenant.company.id);

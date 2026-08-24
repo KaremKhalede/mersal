@@ -28,11 +28,11 @@ export function AddCustomerDialog({ branches }: { branches: { id: string; name: 
       }}
     >
       <div className="space-y-1.5">
-        <Label htmlFor="name">اسم العميل *</Label>
+        <Label htmlFor="name" required>اسم العميل</Label>
         <Input id="name" name="name" required />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="phone">رقم الجوال *</Label>
+        <Label htmlFor="phone" required>رقم الجوال</Label>
         <Input id="phone" name="phone" dir="ltr" required />
       </div>
       <div className="space-y-1.5">

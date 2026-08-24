@@ -6,6 +6,7 @@ import {
   createBranchScopedUser,
   cleanupTenant,
   login,
+  shipmentOverflowAction,
 } from "./helpers";
 import { assertOwnsShipment, assertOwnsShipmentExact } from "../../src/modules/shipments/service";
 
@@ -154,7 +155,7 @@ test.describe("Scenario Y — activity log branch scoping + exact-branch payment
 
     await login(page, employeeAtA.email);
     await page.goto(`/app/shipments/${shipment.id}`);
-    await expect(page.locator("h2", { hasText: shipment.shipmentNumber })).toBeVisible(); // read still works (any-touch)
+    await expect(page.locator("h1", { hasText: shipment.shipmentNumber })).toBeVisible(); // read still works (any-touch)
 
     // Payment: rejected while the shipment is at branch B, employee is at branch A.
     await page.click('button:has-text("تسجيل دفعة")');
@@ -165,7 +166,7 @@ test.describe("Scenario Y — activity log branch scoping + exact-branch payment
     await page.keyboard.press("Escape");
 
     // Edit: same rejection.
-    await page.click('button:has-text("تعديل")');
+    await shipmentOverflowAction(page, "تعديل البيانات");
     await page.fill('input[name="receiverPhone"]', "+967779999999");
     await page.click('[role="dialog"] button:has-text("حفظ التعديلات")');
     await expect(page.locator("text=FORBIDDEN")).toBeVisible();

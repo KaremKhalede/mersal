@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { prisma, createTestTenant, createTestShipment, login, cleanupTenant, pollUntil } from "./helpers";
+import { prisma, createTestTenant, createTestShipment, login, cleanupTenant, pollUntil, shipmentOverflowAction } from "./helpers";
 
 /**
  * Real-world UAT: one traditional land-shipping office runs one complete multi-origin,
@@ -64,11 +64,15 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await page.locator(`[role="option"]:has-text("${mukalla.name}")`).click();
 
     await page.fill('input[name="cartonCount"]', "3");
-    // Intake form carries no financial fields — the MVP decision is that pricing/payment are never
-    // collected at registration, only afterward (edit / "تسجيل دفعة"), so the intake screen stays
-    // purely operational.
-    await expect(page.locator('[role="dialog"] input[name="shippingPrice"]')).toHaveCount(0);
-    await expect(page.locator('[role="dialog"] input[name="amountPaid"]')).toHaveCount(0);
+    // Money at intake is now offered but never required — the counter usually agrees the price as
+    // the cartons are handed over, and making it a separate trip through "تعديل" + "تسجيل دفعة"
+    // cost two more dialogs for one conversation. This test deliberately leaves both blank and then
+    // prices afterward, so the original path stays covered: the assertions below prove a shipment
+    // saved without them is still shippingPrice = null / amountPaid = 0.
+    await expect(page.locator('[role="dialog"] input[name="shippingPrice"]')).toHaveCount(1);
+    await expect(page.locator('[role="dialog"] input[name="shippingPrice"]')).not.toHaveAttribute("required", "");
+    await expect(page.locator('[role="dialog"] input[name="amountPaid"]')).toHaveCount(1);
+    await expect(page.locator('[role="dialog"] input[name="amountPaid"]')).not.toHaveAttribute("required", "");
 
     await page.click('[role="dialog"] button:has-text("حفظ")');
     await page.waitForURL(/\/app\/shipments\/[a-z0-9]+$/);
@@ -84,7 +88,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     expect(dbAAtIntake.unloadBranchId).toBe(mukalla.id);
 
     // Price is set afterward, through the ordinary edit flow (shipment is still REGISTERED).
-    await page.click('button:has-text("تعديل")');
+    await shipmentOverflowAction(page, "تعديل البيانات");
     await page.fill('input[name="shippingPrice"]', "45000");
     await page.click('[role="dialog"] button:has-text("حفظ التعديلات")');
     await expect(page.locator("text=45,000 ر.ي").first()).toBeVisible();
@@ -94,7 +98,11 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await page.fill('input[name="amountPaid"]', "45000");
     await page.click('[role="dialog"] button:has-text("حفظ")');
     await expect(page.locator('[role="dialog"]')).toBeHidden(); // FormDialog only closes on a successful save
-    await expect(page.locator("text=المتبقي")).toBeVisible();
+    // "المتبقي" is on the page twice now — the facts strip's "المتبقي على العميل" above the fold and
+    // the info card's "المتبقي" row — so a bare substring locator matches both. Assert the strip,
+    // which is what a user actually reads, and assert the settled figure rather than mere presence.
+    await expect(page.getByText("المتبقي على العميل")).toBeVisible();
+    await expect(page.getByText("0 ر.ي").first()).toBeVisible();
 
     const dbA = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentAId } });
     expect(Number(dbA.shippingPrice)).toBe(45000);
@@ -381,7 +389,11 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
 
     await page.goto(`/driver/trip/${tripId}`);
     await page.click('button:has-text("تأكيد نهاية الرحلة")');
-    await page.waitForURL(/\/driver$/);
+    // Not /driver: a COMPLETED trip no longer matches that route's active-trip query, so finishing
+    // would land the driver on "لا توجد رحلة نشطة" — an empty screen as the reward for a day's run.
+    // They stay on the trip, which now states that it is done.
+    await page.waitForURL(new RegExp(`/driver/trip/${tripId}$`));
+    await expect(page.locator("text=اكتملت الرحلة").first()).toBeVisible();
 
     const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId } });
     expect(trip.status).toBe("COMPLETED");
@@ -422,7 +434,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
   test("9. Home delivery — one shipment, one DeliveryRequest (double-click concurrency is already covered by Scenario H)", async ({ page, context }) => {
     const publicPage = await context.newPage();
     const dbD = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentDId } });
-    await publicPage.goto(`/track/${dbD.trackingToken}`);
+    await publicPage.goto(`/t/${dbD.trackingToken}`);
     await publicPage.click('button:has-text("توصيل للمنزل")');
     await publicPage.fill('textarea[name="destinationAddress"]', "حي الجامعة، شارع 20");
     // Last 4 digits of the fixture's receiverPhone (+967700000000) — proof of ownership before
@@ -486,7 +498,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
 
     // Missing carton on C (currently ARRIVED).
     await page.goto(`/app/shipments/${shipmentCId}`);
-    await page.click('button:has-text("تسجيل استثناء")');
+    await shipmentOverflowAction(page, "تسجيل استثناء");
     await page.locator('[role="dialog"] button[role="combobox"]').click();
     await page.locator('[role="option"]:has-text("كرتون ناقص")').click();
     await page.fill('textarea[name="note"]', "تبيّن نقص كرتون عند الفحص");
@@ -530,7 +542,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
 
     // Damaged carton on E (currently ARRIVED) — must be stored as a distinct type, not generic text.
     await page.goto(`/app/shipments/${shipmentEId}`);
-    await page.click('button:has-text("تسجيل استثناء")');
+    await shipmentOverflowAction(page, "تسجيل استثناء");
     await page.locator('[role="dialog"] button[role="combobox"]').click();
     await page.locator('[role="option"]:has-text("شحنة تالفة")').click();
     await page.click('[role="dialog"] button:has-text("حفظ")');
@@ -553,7 +565,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     // Customs hold on C — must not corrupt its trip history (its unload record stays intact).
     const cLinkBefore = await prisma.tripShipmentStop.findFirst({ where: { tripId, shipmentId: shipmentCId } });
     await page.goto(`/app/shipments/${shipmentCId}`);
-    await page.click('button:has-text("تسجيل استثناء")');
+    await shipmentOverflowAction(page, "تسجيل استثناء");
     await page.locator('[role="dialog"] button[role="combobox"]').click();
     await page.locator('[role="option"]:has-text("حجز جمركي")').click();
     await page.click('[role="dialog"] button:has-text("حفظ")');
@@ -592,7 +604,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     const trackPage = await context.newPage();
     // Tracking is reached by the shipment's token, never by its number (src/lib/tracking.ts).
     const shipmentA = await prisma.shipment.findUniqueOrThrow({ where: { shipmentNumber: shipmentANumber } });
-    await trackPage.goto(`/track/${shipmentA.trackingToken}`);
+    await trackPage.goto(`/t/${shipmentA.trackingToken}`);
     await expect(trackPage.locator("text=تم التسليم").first()).toBeVisible();
     await expect(trackPage.locator(`text=${tenant.company.name}`).first()).toBeVisible();
     // Internal identifiers (branch DB ids, employee names, exception notes) must never leak.
@@ -617,7 +629,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await login(page, tenant.driverEmail);
     await page.goto("/app");
     await expect(page).toHaveURL(/\/login/);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await expect(page).toHaveURL(/\/login/);
     await page.goto("/app/employees");
     await expect(page).toHaveURL(/\/login/);
@@ -674,7 +686,7 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     expect(totalPlatformFee).not.toBe(Number(a.amountPaid));
 
     await login(page, tenant.adminEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await expect(page.locator("text=80").first()).toBeVisible();
   });
 
@@ -690,6 +702,8 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     // exception raised earlier was resolved). The list route itself must still work when visited
     // directly, since it's kept for the dashboard alert and for staff who bookmark/know the URL.
     await page.goto("/app/exceptions");
-    await expect(page.locator("text=لا توجد استثناءات مفتوحة حالياً")).toBeVisible();
+    // The exceptions list is a primary list page, so it now carries the product's EmptyState rather
+    // than a bare grey line — same wording family, designed treatment.
+    await expect(page.locator("text=لا توجد استثناءات مفتوحة")).toBeVisible();
   });
 });

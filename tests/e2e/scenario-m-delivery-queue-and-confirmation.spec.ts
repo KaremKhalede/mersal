@@ -125,7 +125,7 @@ test.describe("Scenario M — delivery queue operations and customer delivery co
     await prisma.shipment.update({ where: { id: shipment.id }, data: { arrivedCartons: 2 } });
 
     const publicPage = await context.newPage();
-    await publicPage.goto(`/track/${shipment.trackingToken}`);
+    await publicPage.goto(`/t/${shipment.trackingToken}`);
     await publicPage.click('button:has-text("توصيل للمنزل")');
     await publicPage.fill('textarea[name="destinationAddress"]', "حي الجامعة، شارع 20");
     await publicPage.fill('input[name="last4"]', "0000");

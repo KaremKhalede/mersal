@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { prisma, createTestTenant, createTestShipment, createBranchScopedUser, login, cleanupTenant } from "./helpers";
+import { prisma, createTestTenant, createTestShipment, createBranchScopedUser, login, cleanupTenant, shipmentOverflowAction } from "./helpers";
 import { updateShipmentDetails, cancelDraftShipment } from "../../src/modules/shipments/service";
 
 /** Phase 5 P1 batch 2, item 2 — edit/cancel for DRAFT/REGISTERED shipments only. */
@@ -27,7 +27,7 @@ test.describe("Scenario W — shipment edit and cancel (DRAFT/REGISTERED only)",
     expect(before.status).toBe("REGISTERED");
     const cartonsBefore = await prisma.carton.findMany({ where: { shipmentId } });
 
-    await page.click('button:has-text("تعديل")');
+    await shipmentOverflowAction(page, "تعديل البيانات");
     await page.fill('input[name="receiverName"]', "مستلم جديد");
     await page.fill('input[name="receiverPhone"]', "+967779999999");
     await page.fill('input[name="shippingPrice"]', "1500");
@@ -57,7 +57,7 @@ test.describe("Scenario W — shipment edit and cancel (DRAFT/REGISTERED only)",
 
     await login(page, tenant.adminEmail);
     await page.goto(`/app/shipments/${shipment.id}`);
-    await page.click('button:has-text("إلغاء")');
+    await shipmentOverflowAction(page, "إلغاء الشحنة");
     await page.click('[role="dialog"] button:has-text("تأكيد")');
 
     await expect
@@ -79,8 +79,12 @@ test.describe("Scenario W — shipment edit and cancel (DRAFT/REGISTERED only)",
 
     await login(page, tenant.adminEmail);
     await page.goto(`/app/shipments/${shipment.id}`);
-    await expect(page.locator('button:has-text("تعديل")')).toHaveCount(0);
-    await expect(page.locator('button:has-text("إلغاء")')).toHaveCount(0);
+    // Both live in the "⋯" menu now, so the absence has to be checked inside it — a `button:has-text`
+    // assertion would pass here whether they were hidden or merely moved.
+    await page.getByRole("button", { name: "إجراءات أخرى" }).click();
+    await expect(page.getByRole("menuitem", { name: "تعديل البيانات" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "إلغاء الشحنة" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
 
     // Bypassing the UI entirely and calling the service functions directly must still reject it —
     // the button being hidden is not the real security boundary.
@@ -143,7 +147,7 @@ test.describe("Scenario W — shipment edit and cancel (DRAFT/REGISTERED only)",
 
     await login(page, employee.email);
     await page.goto(`/app/shipments/${shipment.id}`);
-    await page.click('button:has-text("إلغاء")');
+    await shipmentOverflowAction(page, "إلغاء الشحنة");
     await page.click('[role="dialog"] button:has-text("تأكيد")');
     await expect
       .poll(async () => (await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } })).status)

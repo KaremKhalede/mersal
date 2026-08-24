@@ -55,7 +55,7 @@ export function RoleForm({
             <Label htmlFor="name">اسم الدور</Label>
             {/* System role names are fixed so "مدير المنصة" stays recognisable. */}
             <Input id="name" name="name" defaultValue={name} disabled={isSystem} required={!isSystem} />
-            {isSystem && <p className="text-[11px] text-muted-foreground">اسم الدور النظامي غير قابل للتعديل.</p>}
+            {isSystem && <p className="text-2xs text-muted-foreground">اسم الدور النظامي غير قابل للتعديل.</p>}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="description">الوصف</Label>

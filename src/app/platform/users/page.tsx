@@ -17,6 +17,7 @@ import { formatBusinessDate, formatBusinessTime } from "@/lib/timezone";
 import { Plus, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
+import { PageHeader } from "@/components/shell/page-header";
 
 const selectClass =
   "h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -60,13 +61,10 @@ export default async function PlatformUsersPage({
 
   return (
     <div className="space-y-4">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight">مستخدمي المنصة</h1>
-          <p className="text-sm text-muted-foreground">إدارة حسابات موظفي منصة الشحن البري</p>
-        </div>
-
-        {canManage && (
+      <PageHeader
+        title="مستخدمي المنصة"
+        description="إدارة حسابات موظفي منصة الشحن البري"
+        actions={canManage && (
           <FormDialog
             trigger={<Button><Plus className="h-4 w-4" /> إضافة مستخدم</Button>}
             title="إضافة مستخدم للمنصة"
@@ -78,7 +76,7 @@ export default async function PlatformUsersPage({
               <Label htmlFor="new-name">الاسم</Label>
               <Input id="new-name" name="name" required />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="new-email">البريد الإلكتروني</Label>
                 <Input id="new-email" name="email" type="email" dir="ltr" required />
@@ -88,7 +86,7 @@ export default async function PlatformUsersPage({
                 <Input id="new-phone" name="phone" dir="ltr" />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="new-role">الدور</Label>
                 <select id="new-role" name="platformRoleId" className={selectClass} required>
@@ -96,7 +94,7 @@ export default async function PlatformUsersPage({
                     <option key={r.id} value={r.id}>{r.name}</option>
                   ))}
                 </select>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-2xs text-muted-foreground">
                   {assignableRoles.map((r) => r.description).filter(Boolean)[0] ?? "الدور يحدد الصفحات المتاحة للمستخدم"}
                 </p>
               </div>
@@ -114,7 +112,7 @@ export default async function PlatformUsersPage({
             </div>
           </FormDialog>
         )}
-      </header>
+      />
 
       <UsersToolbar search={search} status={status} />
 
@@ -143,13 +141,13 @@ export default async function PlatformUsersPage({
                     return (
                       <TableRow key={u.id} className="transition-colors hover:bg-muted/40">
                         <TableCell>
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex items-center gap-2">
                             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                               <UserRound className="h-4.5 w-4.5" />
                             </span>
                             <span className="min-w-0">
                               <span className="block truncate font-medium">{u.name}</span>
-                              <span className="block truncate text-[11px] text-muted-foreground">{roleName}</span>
+                              <span className="block truncate text-2xs text-muted-foreground">{roleName}</span>
                             </span>
                           </div>
                         </TableCell>
@@ -181,7 +179,7 @@ export default async function PlatformUsersPage({
                         <TableCell>
                           <span className="block text-sm">{login.primary}</span>
                           {login.secondary && (
-                            <span className="block text-[11px] tabular-nums text-muted-foreground">{login.secondary}</span>
+                            <span className="block text-2xs tabular-nums text-muted-foreground">{login.secondary}</span>
                           )}
                         </TableCell>
                         <TableCell className="text-center">

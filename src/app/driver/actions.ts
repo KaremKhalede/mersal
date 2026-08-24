@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireDriver } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { confirmBulkLoad, confirmBulkUnload, departStop, completeTrip, reportPartialArrival, assertDriverTripStop } from "@/modules/trips/service";
+import { confirmBulkLoad, confirmBulkUnload, arriveAtStop, departStop, completeTrip, reportPartialArrival, assertDriverTripStop } from "@/modules/trips/service";
 import { raiseException } from "@/modules/shipments/service";
 import { actionResult, type ActionError } from "@/lib/action-result";
 import type { ExceptionType } from "@/lib/enums";
@@ -44,6 +44,17 @@ export async function driverConfirmUnloadAction(tripId: string, stopId: string, 
   }, "تعذّر تأكيد التفريغ");
 }
 
+export async function driverArriveStopAction(tripId: string, stopId: string): Promise<ActionError | void> {
+  const result = await actionResult(async () => {
+    const user = await requireDriver();
+    await assertDriverTripStop(user.id, tripId, stopId);
+    await arriveAtStop(tripId, stopId, user.id);
+    revalidatePath(`/driver/trip/${tripId}`);
+    revalidatePath("/driver");
+  }, "تعذّر تسجيل الوصول إلى المحطة");
+  return result ?? undefined;
+}
+
 export async function driverDepartStopAction(tripId: string, stopId: string): Promise<ActionError | void> {
   const result = await actionResult(async () => {
     const user = await requireDriver();
@@ -68,7 +79,12 @@ export async function driverCompleteTripAction(tripId: string): Promise<ActionEr
 export async function reportProblemAction(formData: FormData): Promise<ActionError | void> {
   const result = await actionResult(async () => {
     const user = await requireDriver();
-    const shipmentId = String(formData.get("shipmentId"));
+    // `|| ""`: formData.get returns null for an absent key and String(null) is "null" — truthy, so
+    // the guard below would wave it through and the driver would get "هذه الشحنة ليست ضمن رحلتك"
+    // (a permission-sounding message) for a shipment they simply had not picked yet. The Select's
+    // `required` used to hide this by blocking the submit — silently, since it sat on Radix's
+    // aria-hidden proxy, which Chrome cannot focus.
+    const shipmentId = String(formData.get("shipmentId") || "");
     const problemType = String(formData.get("problemType"));
     const note = String(formData.get("note") || "");
 
@@ -78,6 +94,15 @@ export async function reportProblemAction(formData: FormData): Promise<ActionErr
     // otherwise any driver could mark an arbitrary shipment (any company's) as an exception.
     const link = await prisma.tripShipmentStop.findFirst({ where: { shipmentId, trip: { driverId: user.id } } });
     if (!link) throw new Error("هذه الشحنة ليست ضمن رحلتك");
+
+    if (!problemType || problemType === "null") throw new Error("اختر نوع المشكلة");
+
+    // The two reports that are claims about where the cargo physically is, checked against what the
+    // trip actually records. The form already offers only the applicable ones per shipment; this is
+    // the same rule on the server, so a stale page cannot post "كرتون ناقص" about boxes that never
+    // left the origin branch — which would mark cartons MISSING that nobody has yet touched.
+    if (problemType === "MISSING_CARTON" && !link.loadedAt) throw new Error("لم تُحمّل هذه الشحنة بعد — لا يمكن الإبلاغ عن كرتون ناقص");
+    if (problemType === "NOT_LOADED" && link.loadedAt) throw new Error("هذه الشحنة محمّلة بالفعل");
 
     if (problemType === "MISSING_CARTON") {
       // Named cartons, not a count: the driver is standing in front of the boxes and knows which

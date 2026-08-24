@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { prisma, createTestTenant, createTestShipment, createTestPlatformAdmin, login, cleanupTenant, pollUntil } from "./helpers";
+import { prisma, createTestTenant, createTestShipment, createTestPlatformAdmin, login, cleanupTenant, pollUntil, driverStopCard, visibleText } from "./helpers";
 import { toUserMessage } from "../../src/lib/action-result";
 import { newTrackingToken } from "../../src/lib/tracking";
 import { createTrip } from "../../src/modules/trips/service";
@@ -82,7 +82,7 @@ test.describe("Not found — contextual, Arabic, with a way back", () => {
   });
 
   test("the customer 404 speaks to a customer, not an employee", async ({ page }) => {
-    await page.goto(`/track/${newTrackingToken()}`);
+    await page.goto(`/t/${newTrackingToken()}`);
     await expect(page.locator("text=لم نجد هذه الشحنة").first()).toBeVisible();
     // Points at the WhatsApp link and the office — not at a dashboard the customer cannot reach.
     await expect(page.locator("text=رسالة الواتساب").first()).toBeVisible();
@@ -166,16 +166,21 @@ test.describe("Server Action failures reach the user in Arabic", () => {
     await login(page, tenant.driverEmail);
     await page.goto(`/driver/trip/${trip.id}`);
 
-    // The UI now applies the server's own rule instead of a looser one, so the driver is stopped
-    // before the request rather than by an error afterwards — and the manifest above the button
-    // spells out what is still aboard.
-    await expect(page.locator('button:has-text("تأكيد نهاية الرحلة")')).toBeDisabled();
-    await expect(page.locator("text=للتفريغ هنا").first()).toBeVisible();
+    // The UI applies the server's own rule instead of a looser one, so the driver is stopped before
+    // the request rather than by an error afterwards. The button is not offered at all while cargo
+    // is aboard — it is not a greyed-out control competing for a thumb, it is simply not the next
+    // step — and the manifest spells out what is still on the truck.
+    await expect(page.locator('button:has-text("تأكيد نهاية الرحلة")')).toHaveCount(0);
+    // What is still aboard is stated at trip level, above the fold, without opening anything: the
+    // stop manifests live inside their own stop, and this is the glanceable version of them.
+    await expect(visibleText(page, "1 للتفريغ").first()).toBeVisible();
     expect((await prisma.trip.findUniqueOrThrow({ where: { id: trip.id } })).status).toBe("IN_PROGRESS");
 
     // Once the cargo is off, the same button works — the rule was about the cargo, not the button.
-    await page.locator('[data-testid^="stop-"]').filter({ hasText: "تأكيد التفريغ" }).first()
-      .locator('button:has-text("تأكيد التفريغ")').click();
+    // The unloading stop is not where the truck is yet, so it is folded — opening it is the tap the
+    // driver would make.
+    const unloadCard = await driverStopCard(page, trip.stops[1].id);
+    await unloadCard.locator('button:has-text("تأكيد التفريغ")').click();
     await page.click('[role="dialog"] button:has-text("تأكيد التفريغ")');
     await pollUntil(
       () => prisma.tripShipmentStop.findFirstOrThrow({ where: { tripId: trip.id } }),

@@ -633,22 +633,33 @@ export async function billingSummary(companyId: string) {
 }
 
 /**
- * Company Owner dashboard finance section — three numbers, deliberately not a ledger/accounting
- * view (that's what /app/billing is for). See Phase 5 P1 batch-1 report for the exact formulas.
- * `branchScope` follows the same convention as every other P0-scoped query (src/lib/branch-scope.ts):
- * null = company-wide, a branchId = restrict to shipments touching that branch.
+ * Company Owner dashboard finance section — deliberately not a ledger/accounting view (that's what
+ * /app/billing is for). `branchScope` follows the same convention as every other P0-scoped query
+ * (src/lib/branch-scope.ts): null = company-wide, a branchId = restrict to shipments touching that
+ * branch.
+ *
+ * ## Why "collectedToday" is no longer here
+ *
+ * It used to be the third figure, computed as SUM(amountPaid) over shipments whose `paymentDate`
+ * fell today. That is not what was collected today. `Shipment.amountPaid` is a running total and
+ * `paymentDate` marks only the most recent payment, so a shipment paid 500 last week and 300 this
+ * morning contributed 800 to "today" — every earlier instalment counted again, every day the
+ * shipment was touched.
+ *
+ * The figure now comes from `collectedOnDay` in modules/collections/service.ts, which differences
+ * consecutive payment events instead of re-reading a cumulative column. It was removed from here
+ * rather than fixed in place on purpose: leaving a second, wrong definition of "collected" in the
+ * codebase is how the dashboard and the daily-close sheet end up disagreeing about the same day.
+ *
+ * Note the deliberate asymmetry with `outstanding` below: outstanding is a BALANCE, correctly read
+ * straight off the shipment rows, and is unaffected by any of this.
  */
 export async function financeSummary(companyId: string, branchScope?: string | null) {
-  const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const branchWhere = branchScope ? shipmentTouchesBranch(branchScope) : {};
 
-  const [paidToday, openBalances, feeEntries] = await Promise.all([
-    prisma.shipment.findMany({
-      where: { companyId, paymentDate: { gte: todayStart }, ...branchWhere },
-      select: { amountPaid: true },
-    }),
+  const [openBalances, feeEntries] = await Promise.all([
     prisma.shipment.findMany({
       where: { companyId, status: { not: "CANCELLED" }, shippingPrice: { not: null }, ...branchWhere },
       select: { shippingPrice: true, amountPaid: true },
@@ -664,10 +675,9 @@ export async function financeSummary(companyId: string, branchScope?: string | n
     }),
   ]);
 
-  const collectedToday = paidToday.reduce((sum, s) => sum + toMoney(s.amountPaid), 0);
   const outstanding = openBalances.reduce((sum, s) => sum + Math.max(0, toMoney(s.shippingPrice) - toMoney(s.amountPaid)), 0);
   const platformFeesMTD = feeEntries.reduce((sum, e) => sum + toMoney(e.amount), 0);
   const cartonsMTD = feeEntries.reduce((sum, e) => sum + e.cartonCount, 0);
 
-  return { collectedToday, outstanding, platformFeesMTD, cartonsMTD };
+  return { outstanding, platformFeesMTD, cartonsMTD };
 }

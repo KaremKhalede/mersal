@@ -13,6 +13,8 @@ import { Plus, Building2, Users } from "lucide-react";
 import { createBranchAction } from "./actions";
 import { BranchFilters } from "./filters";
 import { BranchRowActions } from "./branch-row-actions";
+import { PageHeader } from "@/components/shell/page-header";
+import { EmptyState, TableEmpty } from "@/components/feedback/empty-state";
 
 const PAGE_SIZE_DEFAULT = 10;
 
@@ -37,18 +39,10 @@ export default async function BranchesPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Building2 className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold">الفروع</h2>
-            <p className="text-sm text-muted-foreground">إدارة فروع المؤسسة ومعلوماتها التشغيلية</p>
-          </div>
-        </div>
-
-        <FormDialog
+      <PageHeader
+        title="الفروع"
+        description="إدارة فروع المؤسسة ومعلوماتها التشغيلية"
+        actions={<FormDialog
           trigger={<Button><Plus className="h-4 w-4" /> فرع جديد</Button>}
           title="إضافة فرع جديد"
           action={async (fd) => {
@@ -57,21 +51,32 @@ export default async function BranchesPage({
           }}
         >
           <div className="space-y-1.5">
-            <Label htmlFor="name">اسم الفرع</Label>
+            <Label htmlFor="name" required>اسم الفرع</Label>
             <Input id="name" name="name" placeholder="فرع الرياض" required />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="city">المدينة</Label>
+              <Label htmlFor="city" required>المدينة</Label>
               <Input id="city" name="city" required />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="country">الدولة</Label>
+              <Label htmlFor="country" required>الدولة</Label>
               <Input id="country" name="country" required />
             </div>
           </div>
-        </FormDialog>
-      </div>
+          {/* Optional, and not marked required — a company that has always run one switchboard
+              must not be blocked from adding a branch, and every screen falls back to the
+              company's own number when a branch has none. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="phone">هاتف الفرع</Label>
+            <Input id="phone" name="phone" dir="ltr" placeholder="+967 77 123 4567" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="address">عنوان الفرع</Label>
+            <Input id="address" name="address" placeholder="الشارع، أقرب معلم" />
+          </div>
+        </FormDialog>}
+      />
 
       <BranchFilters countries={countries} status={sp.status} country={sp.country} search={sp.q} />
 
@@ -109,16 +114,18 @@ export default async function BranchesPage({
                     <ActiveBadge active={b.status === "ACTIVE"} />
                   </TableCell>
                   <TableCell>
-                    <BranchRowActions branch={{ id: b.id, name: b.name, city: b.city, country: b.country, status: b.status }} />
+                    <BranchRowActions branch={{ id: b.id, name: b.name, city: b.city, country: b.country, status: b.status, phone: b.phone, address: b.address }} />
                   </TableCell>
                 </TableRow>
               ))}
               {branches.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                    لا توجد فروع مطابقة
-                  </TableCell>
-                </TableRow>
+                <TableEmpty colSpan={6}>
+                  <EmptyState
+                    icon={Building2}
+                    title="لا توجد فروع بعد"
+                    description="الفرع هو نقطة تحميل أو تفريغ — أضف فرعاً لتتمكن من تسجيل الشحنات وتخطيط الرحلات."
+                  />
+                </TableEmpty>
               )}
             </TableBody>
           </Table>

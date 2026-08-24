@@ -20,16 +20,18 @@ type Shipment = {
 
 /** Only offered for DRAFT/REGISTERED shipments (see ShipmentActions) — before a trip, customs
  * case, or payment exists, receiver/goods/price details can still be safely corrected. */
-export function EditShipmentDialog({ shipment }: { shipment: Shipment }) {
+export function EditShipmentDialog({ shipment, open, onOpenChange }: { shipment: Shipment; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   return (
     <FormDialog
-      trigger={<Button size="sm" variant="outline"><Pencil className="h-4 w-4" /> تعديل</Button>}
+      open={open}
+      onOpenChange={onOpenChange}
+      trigger={open === undefined ? <Button size="sm" variant="outline"><Pencil className="h-4 w-4" /> تعديل</Button> : undefined}
       title="تعديل بيانات الشحنة"
       action={updateShipmentAction}
       submitLabel="حفظ التعديلات"
     >
       <input type="hidden" name="shipmentId" value={shipment.id} />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="receiverName">اسم المستلم</Label>
           <Input id="receiverName" name="receiverName" defaultValue={shipment.receiverName} required />
@@ -39,7 +41,7 @@ export function EditShipmentDialog({ shipment }: { shipment: Shipment }) {
           <Input id="receiverPhone" name="receiverPhone" dir="ltr" defaultValue={shipment.receiverPhone} required />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="goodsType">نوع البضاعة</Label>
           <Input id="goodsType" name="goodsType" defaultValue={shipment.goodsType ?? ""} />

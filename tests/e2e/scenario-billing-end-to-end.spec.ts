@@ -22,7 +22,7 @@ test.describe("Scenario — billing end to end", () => {
 
     // 2. Company sees the invoice, unpaid.
     await login(page, tenant.adminEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await expect(page.locator(`text=${invoice.invoiceNumber}`).first()).toBeVisible();
     await expect(page.locator("tbody").locator("text=غير مدفوعة").first()).toBeVisible();
 
@@ -55,7 +55,7 @@ test.describe("Scenario — billing end to end", () => {
     await page.goto(`/platform/billing/${tenant.company.id}`);
     await expect(page.locator("text=مدفوعة").first()).toBeVisible();
     await login(page, tenant.adminEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await expect(page.locator("tbody").locator("text=مدفوعة").first()).toBeVisible();
 
     await cleanupTenant(tenant.company.id);
@@ -74,7 +74,7 @@ test.describe("Scenario — billing end to end", () => {
     ).toBe(1);
 
     await login(page, tenant.adminEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await expect(page.locator("tbody").locator("text=مدفوعة جزئياً").first()).toBeVisible();
     // 50 - 20 = 30 remaining.
     await expect(page.locator("text=30").first()).toBeVisible();
@@ -99,7 +99,7 @@ test.describe("Scenario — billing end to end", () => {
 
     // The company sees why, and the CTA is available again.
     await login(page, tenant.adminEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await expect(page.locator("text=الإثبات غير واضح").first()).toBeVisible();
     const cta = page.locator('button:has-text("الإبلاغ عن دفعة")');
     await expect(cta).toBeVisible();
@@ -120,7 +120,7 @@ test.describe("Scenario — billing end to end", () => {
     await submitPayment({ companyId: tenant.company.id, invoiceId: invoice.id, amount: 50, method: "CASH" });
 
     await login(page, tenant.adminEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await expect(page.locator('button:has-text("الإبلاغ عن دفعة")')).toBeDisabled();
 
     await cleanupTenant(tenant.company.id);
@@ -155,7 +155,7 @@ test.describe("Scenario — billing end to end", () => {
     await expect(page).not.toHaveURL(/\/platform\/billing$/);
 
     // 16. The other tenant's own billing page must not leak this invoice.
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await expect(page.locator(`text=${invoice.invoiceNumber}`)).toHaveCount(0);
 
     await cleanupTenant(tenant.company.id);
@@ -171,7 +171,7 @@ test.describe("Scenario — billing end to end", () => {
 
     // The company has no issuing control at all.
     await login(page, tenant.adminEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await expect(page.locator('button:has-text("إصدار فاتورة")')).toHaveCount(0);
 
     // The platform does, and it produces a real invoice.

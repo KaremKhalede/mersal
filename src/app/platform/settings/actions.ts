@@ -6,6 +6,7 @@ import { assertCanPlatform } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { PLATFORM_ID } from "@/lib/platform";
 import { actionResult } from "@/lib/action-result";
+import { normalizePhone, phoneError } from "@/lib/phone";
 
 export type SettingsState = { error?: string; success?: string };
 
@@ -38,16 +39,44 @@ export async function updatePlatformSettingsAction(
     if (!feeRaw || !Number.isFinite(fee)) throw new Error("أدخل رسوم الكرتون كرقم صحيح");
     if (fee < 0) throw new Error("لا يمكن أن تكون رسوم الكرتون بالسالب");
 
+    // Support contact for the public tracking page. Blank is NULL, never "" — /track renders the
+    // whole contact band only when at least one of these is set, and an empty string would keep an
+    // empty row on a customer-facing screen. Phones go through the product's one phone rule so an
+    // unreachable support number cannot be published; a blank one is simply cleared.
+    const contact: Record<string, string | null> = {};
+    for (const [field, label] of [
+      ["supportPhone", "رقم الدعم"],
+      ["supportWhatsapp", "رقم واتساب الدعم"],
+    ] as const) {
+      const raw = String(formData.get(field) || "").trim();
+      if (!raw) {
+        contact[field] = null;
+        continue;
+      }
+      const problem = phoneError(raw, label);
+      if (problem) throw new Error(problem);
+      contact[field] = normalizePhone(raw);
+    }
+    const supportEmail = String(formData.get("supportEmail") || "").trim();
+    if (supportEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail)) {
+      throw new Error("بريد الدعم غير صالح");
+    }
+
     await prisma.platform.update({
       where: { id: PLATFORM_ID },
       data: {
         name,
         feePerCartonYER: fee,
         whatsappSenderName: String(formData.get("whatsappSenderName") || "").trim(),
+        ...contact,
+        supportEmail: supportEmail || null,
+        supportHours: String(formData.get("supportHours") || "").trim() || null,
       },
     });
 
     revalidatePath("/platform/settings");
+    // The public page reads these — it must not keep serving the previous contact band.
+    revalidatePath("/track");
   }, "تعذّر حفظ الإعدادات");
 
   if (result && "error" in result) return result;

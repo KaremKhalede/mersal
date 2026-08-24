@@ -7,7 +7,7 @@ import { FileDown } from "lucide-react";
 import { exportShipmentsCsvAction } from "./actions";
 import type { ShipmentStatus } from "@/lib/enums";
 
-export function ExportButton({ status, search, branchId }: { status?: ShipmentStatus; search?: string; branchId?: string }) {
+export function ExportButton({ status, search, branchId, unpaid }: { status?: ShipmentStatus; search?: string; branchId?: string; unpaid?: boolean }) {
   const [pending, startTransition] = useTransition();
 
   return (
@@ -17,7 +17,7 @@ export function ExportButton({ status, search, branchId }: { status?: ShipmentSt
       onClick={() =>
         startTransition(async () => {
           try {
-            const csv = await exportShipmentsCsvAction({ status, search, branchId });
+            const csv = await exportShipmentsCsvAction({ status, search, branchId, unpaid });
             const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");

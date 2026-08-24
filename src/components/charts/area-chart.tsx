@@ -34,7 +34,7 @@ export function AreaChart({ series, labelCurrent, labelPrevious }: { series: Ser
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-end gap-4 text-[11px] text-muted-foreground">
+      <div className="mb-3 flex items-center justify-end gap-4 text-2xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-primary" />
           {labelCurrent}
@@ -46,7 +46,7 @@ export function AreaChart({ series, labelCurrent, labelPrevious }: { series: Ser
       </div>
 
       <div className="flex gap-2" dir="ltr">
-        <div className="flex flex-col justify-between py-1 text-[10px] tabular-nums text-muted-foreground">
+        <div className="flex flex-col justify-between py-1 text-2xs tabular-nums text-muted-foreground">
           {ticks.map((t, i) => (
             <span key={i}>{t >= 1000 ? `${Math.round(t / 1000)}K` : t}</span>
           ))}
@@ -101,7 +101,7 @@ export function AreaChart({ series, labelCurrent, labelPrevious }: { series: Ser
             />
           </svg>
 
-          <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted-foreground">
+          <div className="mt-1 flex justify-between text-2xs tabular-nums text-muted-foreground">
             {[1, 6, 11, 16, 21, 26, series.length].map((d) => (
               <span key={d}>{d}</span>
             ))}

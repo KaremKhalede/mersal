@@ -16,7 +16,7 @@ export function UsersToolbar({ search, status }: { search: string; status: strin
     <form action="/platform/users" className="rounded-xl border bg-card p-3 shadow-sm">
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-56 flex-1 space-y-1.5">
-          <label htmlFor="q" className="text-[11px] font-medium text-muted-foreground">البحث</label>
+          <label htmlFor="q" className="text-2xs font-medium text-muted-foreground">البحث</label>
           <div className="relative">
             <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input id="q" name="q" defaultValue={search} placeholder="ابحث بالاسم أو البريد الإلكتروني..." className="h-9 pe-9" />
@@ -24,7 +24,7 @@ export function UsersToolbar({ search, status }: { search: string; status: strin
         </div>
 
         <div className="w-40 space-y-1.5">
-          <label htmlFor="status" className="text-[11px] font-medium text-muted-foreground">الحالة</label>
+          <label htmlFor="status" className="text-2xs font-medium text-muted-foreground">الحالة</label>
           <select
             id="status"
             name="status"

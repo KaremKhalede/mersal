@@ -165,6 +165,9 @@ export async function createTestShipment(params: {
   shippingPrice?: number;
   amountPaid?: number;
   paymentDate?: Date;
+  /** Who took the money. Mirrors `Shipment.paymentReceivedById` AND the acting user on the
+   *  RECORD_PAYMENT audit row below, which is what the daily close attributes takings by. */
+  paymentReceivedById?: string;
   /** Defaults to a valid number. Pass "" or a malformed value to exercise the receiver-notification
    * skip path (a receiver the office cannot reach must never break the shipment operation). */
   receiverPhone?: string;
@@ -186,8 +189,34 @@ export async function createTestShipment(params: {
       shippingPrice: params.shippingPrice,
       amountPaid: params.amountPaid ?? 0,
       paymentDate: params.paymentDate,
+      paymentReceivedById: params.paymentReceivedById,
     },
   });
+
+  // The payment EVENT, not just the resulting balance.
+  //
+  // `Shipment.amountPaid` is a running total, so "what was collected on day X" cannot be read off
+  // it — it is derived by differencing consecutive RECORD_PAYMENT audit rows (see
+  // src/modules/collections/service.ts). Real payments write one through `recordPayment`, and an
+  // intake payment writes one through `createShipment`; a fixture that set the column without the
+  // event would produce a shipment whose money exists on the shipment page and nowhere in the daily
+  // close — a state the application itself can no longer reach.
+  //
+  // `createdAt` is set explicitly to `paymentDate` rather than defaulting to now(), so a fixture
+  // dated "yesterday" lands in yesterday's close.
+  if (params.amountPaid) {
+    await prisma.auditLog.create({
+      data: {
+        companyId: params.companyId,
+        userId: params.paymentReceivedById ?? null,
+        action: "RECORD_PAYMENT",
+        entityType: "Shipment",
+        entityId: shipment.id,
+        metadata: JSON.stringify({ amountPaid: params.amountPaid, paymentMethod: "CASH" }),
+        createdAt: params.paymentDate ?? new Date(),
+      },
+    });
+  }
   await prisma.carton.createMany({
     data: Array.from({ length: params.cartonCount }, (_, i) => ({ shipmentId: shipment.id, cartonIndex: i + 1, cartonCode: `${shipmentNumber}-C${i + 1}` })),
   });
@@ -218,4 +247,66 @@ export async function createTestTrip(params: {
 /** Links a shipment onto a trip at the given stops, same effect as autoAssignShipmentToTrip. */
 export async function linkShipmentToTrip(tripId: string, shipmentId: string, loadStopId: string, unloadStopId: string) {
   return prisma.tripShipmentStop.create({ data: { tripId, shipmentId, loadStopId, unloadStopId } });
+}
+
+/**
+ * A record number renders twice on the shipments and trips lists — once in the phone card list,
+ * once in the desktop table — with CSS choosing which one is shown at the current viewport. A bare
+ * `text=` locator matches both and trips Playwright's strict mode.
+ *
+ * Filtering to what is actually visible, rather than reaching for `.first()`, matters: `.first()`
+ * returns whichever comes first in the DOM (the phone list), so a desktop-viewport test could pass
+ * while the table it means to check is broken.
+ *
+ * For "this must not leak" assertions keep using a bare `text=` with toHaveCount(0) — absence from
+ * the DOM is the stronger claim, and that is what those tests are for.
+ */
+export function visibleText(page: Page, text: string) {
+  return page.locator(`text=${text}`).filter({ visible: true });
+}
+
+/**
+ * Picks one of the shipment detail page's secondary actions.
+ *
+ * تعديل, إلغاء الشحنة, نسخ رابط التتبع and تسجيل استثناء are no longer buttons in the header row —
+ * they live behind the "⋯" overflow menu (see ShipmentActions), which keeps a single primary next
+ * to طباعة الملصقات instead of five to seven controls at equal weight. The actions themselves are
+ * unchanged; only where you click to reach them is.
+ *
+ * تسجيل دفعة is deliberately NOT always in there: it stays a visible button while money is owed and
+ * drops into the menu once the shipment is settled, so callers should reach for it directly first.
+ */
+export async function shipmentOverflowAction(page: Page, name: string | RegExp) {
+  await page.getByRole("button", { name: "إجراءات أخرى" }).click();
+  await page.getByRole("menuitem", { name }).click();
+}
+
+/**
+ * The driver screen's stop card, opened.
+ *
+ * The driver's trip screen shows one stop expanded — the one the truck is at — and folds every
+ * other stop into a `<details>` row, so its manifest and its buttons are in the DOM but not in the
+ * accessibility tree until the row is opened. A test asserting on a stop it has not opened would
+ * fail on visibility rather than on the thing it means to check, so every driver-side assertion
+ * goes through here. Opening a fold the driver would have tapped is not a workaround: it is the
+ * tap, done by the test.
+ */
+export async function driverStopCard(page: Page, stopId: string) {
+  const card = page.getByTestId(`stop-${stopId}`);
+  await card.waitFor();
+  await card.evaluate((el) => {
+    if (el instanceof HTMLDetailsElement) el.open = true;
+  });
+  return card;
+}
+
+/**
+ * The one big button at the bottom of the driver screen — the next step, whatever it currently is.
+ *
+ * Its label is derived from the current stop's state (تأكيد الوصول -> تأكيد التفريغ -> تأكيد
+ * التحميل -> مغادرة المحطة -> تأكيد نهاية الرحلة), so a test that wants "the action the driver is
+ * on" asks for it by position, not by name.
+ */
+export function driverPrimaryAction(page: Page) {
+  return page.getByTestId("driver-primary-action").locator("button");
 }

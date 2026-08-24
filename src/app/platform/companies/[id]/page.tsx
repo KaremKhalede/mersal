@@ -1,28 +1,27 @@
-import Link from "next/link";
-import { notFound } from "next/navigation";
-import { requirePlatformAdmin } from "@/lib/auth";
-import { requireCanPlatform, canPlatform } from "@/lib/rbac";
-import { getCompanyDetail } from "@/modules/companies/service";
+import Link from"next/link";
+import { notFound } from"next/navigation";
+import { requirePlatformAdmin } from"@/lib/auth";
+import { requireCanPlatform, canPlatform } from"@/lib/rbac";
+import { getCompanyDetail } from"@/modules/companies/service";
 import {
   platformBillingCompanyDetail,
   listCompanyInvoiceStates,
   getCurrentPlatformFee,
   INVOICE_STATE_LABELS,
   INVOICE_STATE_STYLES,
-} from "@/modules/billing/service";
-import { Card, CardContent } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { FormDialog } from "@/components/shell/form-dialog";
-import { formatBusinessDate } from "@/lib/timezone";
-import { updateCompanyProfileAction } from "../actions";
+} from"@/modules/billing/service";
+import { Card, CardContent } from"@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from"@/components/ui/table";
+import { Badge } from"@/components/ui/badge";
+import { Button } from"@/components/ui/button";
+import { Input } from"@/components/ui/input";
+import { Label } from"@/components/ui/label";
+import { FormDialog } from"@/components/shell/form-dialog";
+import { formatBusinessDate } from"@/lib/timezone";
+import { updateCompanyProfileAction } from"../actions";
 import {
   Building2,
   ChevronLeft,
-  ChevronRight,
   CalendarDays,
   UserRound,
   Mail,
@@ -34,12 +33,15 @@ import {
   Users,
   Truck,
   Pencil,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { ResetPasswordDialog } from "@/components/shell/reset-password-dialog";
-import { resetCompanyUserPasswordAction } from "../actions";
+} from"lucide-react";
+import { cn } from"@/lib/utils";
+import { ResetPasswordDialog } from"@/components/shell/reset-password-dialog";
+import { resetCompanyUserPasswordAction } from"../actions";
+import { StatCard } from"@/components/ui/stat-card";
+import { PageHeader } from"@/components/shell/page-header";
+import { formatAmount, formatYER } from"@/lib/money";
 
-const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (n: number) => formatAmount(n, 2);
 const int = (n: number) => n.toLocaleString("en-US");
 
 /** One contact fact with its icon tile — the strip under the page header. */
@@ -60,8 +62,8 @@ function ContactItem({
         <Icon className="h-4.5 w-4.5" />
       </span>
       <div className="min-w-0">
-        <p className="text-[11px] text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-medium" dir={ltr ? "ltr" : undefined}>{value}</p>
+        <p className="text-2xs text-muted-foreground">{label}</p>
+        <p className="truncate text-sm font-medium" dir={ltr ?"ltr" : undefined}>{value}</p>
       </div>
     </div>
   );
@@ -73,24 +75,21 @@ function Metric({
   unit,
   icon: Icon,
   tone,
-  delay,
 }: {
   label: string;
   value: string;
   unit: string;
   icon: React.ComponentType<{ className?: string }>;
   tone: string;
-  delay: number;
 }) {
   return (
     <div
-      style={{ animationDelay: `${delay}ms` }}
-      className="animate-in flex items-center justify-between gap-3 rounded-xl border bg-card p-4 shadow-sm fade-in slide-in-from-bottom-3 duration-500 transition-all [animation-fill-mode:backwards] hover:-translate-y-0.5 hover:shadow-md motion-reduce:animate-none motion-reduce:hover:translate-y-0"
+      className="flex items-center justify-between gap-3 rounded-xl border bg-card p-4 shadow-sm transition-all"
     >
       <div className="min-w-0">
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="mt-1 text-2xl font-bold leading-none tabular-nums">{value}</p>
-        <p className="mt-1 text-[11px] text-muted-foreground">{unit}</p>
+        <p className="mt-1 text-2xs text-muted-foreground">{unit}</p>
       </div>
       <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", tone)}>
         <Icon className="h-5 w-5" />
@@ -108,36 +107,9 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function QuickStat({
-  label,
-  value,
-  hint,
-  icon: Icon,
-  tone,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  icon: React.ComponentType<{ className?: string }>;
-  tone: string;
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:border-primary/30 hover:bg-accent/40">
-      <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", tone)}>
-        <Icon className="h-5 w-5" />
-      </span>
-      <div className="min-w-0">
-        <p className="text-[11px] text-muted-foreground">{label}</p>
-        <p className="text-lg font-bold leading-tight tabular-nums">{value}</p>
-        <p className="text-[11px] text-muted-foreground">{hint}</p>
-      </div>
-    </div>
-  );
-}
-
 export default async function PlatformCompanyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const me = await requirePlatformAdmin();
-  requireCanPlatform(me, "companies", "view");
+  requireCanPlatform(me,"companies","view");
   const { id } = await params;
 
   const month = new Date();
@@ -149,56 +121,32 @@ export default async function PlatformCompanyDetailPage({ params }: { params: Pr
   ]);
   if (!company || !billing) notFound();
 
-  const active = company.status === "ACTIVE";
+  const active = company.status ==="ACTIVE";
   const latestInvoices = invoices.slice(0, 3);
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <nav aria-label="breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-          <Link href="/platform/companies" className="hover:text-foreground">الشركات</Link>
-          <ChevronLeft className="h-3.5 w-3.5" />
-          <span className="font-medium text-foreground">تفاصيل الشركة</span>
-        </nav>
-        <Link
-          href="/platform/companies"
-          className="inline-flex items-center gap-1 rounded-lg border bg-card px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <ChevronRight className="h-4 w-4" /> رجوع إلى الشركات
-        </Link>
-      </div>
-
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span
-            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-white"
-            style={{ backgroundColor: company.logoColor }}
-            aria-hidden="true"
+      <PageHeader
+        variant="record"
+        title={company.name}
+        description={`${company.slug} · عضو منذ ${formatBusinessDate(company.createdAt)}`}
+        badge={
+          <Badge
+            variant="outline"
+            className={active ?"border-success/30 bg-success/15 text-success" :"border-warning/30 bg-warning/15 text-warning"}
           >
-            <Building2 className="h-7 w-7" />
-          </span>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold tracking-tight">{company.name}</h1>
-              <Badge
-                variant="outline"
-                className={active ? "border-success/30 bg-success/15 text-success" : "border-warning/30 bg-warning/15 text-warning"}
-              >
-                {active ? "نشطة" : "متوقفة"}
-              </Badge>
-            </div>
-            <p className="text-sm text-muted-foreground" dir="ltr">{company.slug}</p>
-            <p className="text-[11px] text-muted-foreground">عضو منذ: {formatBusinessDate(company.createdAt)}</p>
-          </div>
-        </div>
-      </header>
+            {active ?"نشطة" :"متوقفة"}
+          </Badge>
+        }
+        parent={{ label: "الشركات", href: "/platform/companies" }}
+      />
 
       <Card>
         <CardContent className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 xl:grid-cols-4">
           <ContactItem label="تاريخ التسجيل" value={formatBusinessDate(company.createdAt)} icon={CalendarDays} ltr />
-          <ContactItem label="المالك" value={company.owner?.name ?? "—"} icon={UserRound} />
-          <ContactItem label="البريد الإلكتروني" value={company.email ?? company.owner?.email ?? "—"} icon={Mail} ltr />
-          <ContactItem label="الهاتف" value={company.phone ?? "—"} icon={Phone} ltr />
+          <ContactItem label="المالك" value={company.owner?.name ??"—"} icon={UserRound} />
+          <ContactItem label="البريد الإلكتروني" value={company.email ?? company.owner?.email ??"—"} icon={Mail} ltr />
+          <ContactItem label="الهاتف" value={company.phone ??"—"} icon={Phone} ltr />
         </CardContent>
         {/* The only recovery path when the locked-out person IS the company admin — nobody inside
             the tenant outranks them. See resetCompanyUserPasswordAction. */}
@@ -216,10 +164,10 @@ export default async function PlatformCompanyDetailPage({ params }: { params: Pr
       <section className="space-y-3">
         <h2 className="text-sm font-bold">ملخص مالي (هذا الشهر)</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Metric label="الكراتين هذا الشهر" value={int(billing.cartons)} unit="كرتون" icon={Package} tone="bg-success/15 text-success" delay={0} />
-          <Metric label="المستحق" value={money(billing.due)} unit="ر.ي" icon={Receipt} tone="bg-warning/15 text-warning" delay={60} />
-          <Metric label="المحصل" value={money(billing.collected)} unit="ر.ي" icon={Wallet} tone="bg-primary/10 text-primary" delay={120} />
-          <Metric label="المتبقي" value={money(billing.remaining)} unit="ر.ي" icon={CircleAlert} tone="bg-destructive/10 text-destructive" delay={180} />
+          <Metric label="الكراتين هذا الشهر" value={int(billing.cartons)} unit="كرتون" icon={Package} tone="success" />
+          <Metric label="المستحق" value={money(billing.due)} unit="ر.ي" icon={Receipt} tone="warning" />
+          <Metric label="المحصل" value={money(billing.collected)} unit="ر.ي" icon={Wallet} tone="primary" />
+          <Metric label="المتبقي" value={money(billing.remaining)} unit="ر.ي" icon={CircleAlert} tone="destructive" />
         </div>
       </section>
 
@@ -232,19 +180,19 @@ export default async function PlatformCompanyDetailPage({ params }: { params: Pr
             <InfoRow label="حالة الشركة">
               <Badge
                 variant="outline"
-                className={active ? "border-success/30 bg-success/15 text-success" : "border-warning/30 bg-warning/15 text-warning"}
+                className={active ?"border-success/30 bg-success/15 text-success" :"border-warning/30 bg-warning/15 text-warning"}
               >
-                {active ? "نشطة" : "متوقفة"}
+                {active ?"نشطة" :"متوقفة"}
               </Badge>
             </InfoRow>
-            {/* "التسعير" not "الباقة": the platform is usage-priced, there are no packages. */}
-            <InfoRow label="التسعير">حسب الاستخدام ({money(feePerCarton)} ر.ي / كرتون)</InfoRow>
-            <InfoRow label="المالك">{company.owner?.name ?? "—"}</InfoRow>
+            {/*"التسعير" not"الباقة": the platform is usage-priced, there are no packages. */}
+            <InfoRow label="التسعير">حسب الاستخدام ({formatYER(feePerCarton, 2)} / كرتون)</InfoRow>
+            <InfoRow label="المالك">{company.owner?.name ??"—"}</InfoRow>
             <InfoRow label="عدد الفروع">{int(company.branches.length)}</InfoRow>
             <InfoRow label="عدد المستخدمين">{int(company._count.users)}</InfoRow>
 
             <div className="mt-4">
-              {canPlatform(me, "companies", "manage") && <FormDialog
+              {canPlatform(me,"companies","manage") && <FormDialog
                 trigger={
                   <Button variant="outline" className="h-9">
                     <Pencil className="h-4 w-4" /> تعديل معلومات الشركة
@@ -258,14 +206,14 @@ export default async function PlatformCompanyDetailPage({ params }: { params: Pr
                   <Label htmlFor="name">اسم الشركة</Label>
                   <Input id="name" name="name" defaultValue={company.name} required />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="phone">الهاتف</Label>
-                    <Input id="phone" name="phone" defaultValue={company.phone ?? ""} dir="ltr" />
+                    <Input id="phone" name="phone" defaultValue={company.phone ??""} dir="ltr" />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="email">البريد الإلكتروني</Label>
-                    <Input id="email" name="email" defaultValue={company.email ?? ""} dir="ltr" />
+                    <Input id="email" name="email" defaultValue={company.email ??""} dir="ltr" />
                   </div>
                 </div>
               </FormDialog>}
@@ -294,7 +242,7 @@ export default async function PlatformCompanyDetailPage({ params }: { params: Pr
                       <TableRow key={inv.id} className="transition-colors hover:bg-muted/40">
                         <TableCell dir="ltr" className="font-medium">{inv.invoiceNumber}</TableCell>
                         <TableCell className="tabular-nums text-muted-foreground">{formatBusinessDate(inv.createdAt)}</TableCell>
-                        <TableCell className="tabular-nums">{money(inv.totalAmount)} ر.ي</TableCell>
+                        <TableCell className="tabular-nums">{formatYER(inv.totalAmount, 2)}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className={INVOICE_STATE_STYLES[inv.state]}>
                             {INVOICE_STATE_LABELS[inv.state]}
@@ -323,11 +271,11 @@ export default async function PlatformCompanyDetailPage({ params }: { params: Pr
         <CardContent className="p-4">
           <h2 className="mb-3 text-sm font-bold">نظرة سريعة</h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <QuickStat label="عدد المستخدمين" value={int(company._count.users)} hint="مستخدم" icon={Users} tone="bg-primary/10 text-primary" />
-            <QuickStat label="عدد الفروع" value={int(company.branches.length)} hint="فرع" icon={Building2} tone="bg-violet-500/10 text-violet-600 dark:text-violet-400" />
-            <QuickStat label="إجمالي الكراتين" value={int(company.monthly.cartons)} hint="هذا الشهر" icon={Package} tone="bg-warning/15 text-warning" />
-            <QuickStat label="إجمالي الرحلات" value={int(company.monthly.trips)} hint="هذا الشهر" icon={Truck} tone="bg-success/15 text-success" />
-            <QuickStat label="إجمالي الشحنات" value={int(company.monthly.shipments)} hint="هذا الشهر" icon={Package} tone="bg-primary/10 text-primary" />
+            <StatCard label="عدد المستخدمين" value={int(company._count.users)} unit="مستخدم" icon={Users} tone="primary" />
+            <StatCard label="عدد الفروع" value={int(company.branches.length)} unit="فرع" icon={Building2} tone="primary" />
+            <StatCard label="إجمالي الكراتين" value={int(company.monthly.cartons)} unit="هذا الشهر" icon={Package} tone="warning" />
+            <StatCard label="إجمالي الرحلات" value={int(company.monthly.trips)} unit="هذا الشهر" icon={Truck} tone="success" />
+            <StatCard label="إجمالي الشحنات" value={int(company.monthly.shipments)} unit="هذا الشهر" icon={Package} tone="primary" />
           </div>
         </CardContent>
       </Card>

@@ -7,12 +7,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FormDialog } from "@/components/shell/form-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MoreVertical, Eye, Pencil, Ban, CheckCircle2 } from "lucide-react";
 import { updateBranchAction, toggleBranchStatusAction } from "./actions";
 
-type Branch = { id: string; name: string; city: string; country: string; status: string };
+type Branch = { id: string; name: string; city: string; country: string; status: string; phone: string | null; address: string | null };
 
 export function BranchRowActions({ branch }: { branch: Branch }) {
   const [editOpen, setEditOpen] = useState(false);
@@ -28,19 +28,6 @@ export function BranchRowActions({ branch }: { branch: Branch }) {
         toast.success(isActive ? "تم تعطيل الفرع" : "تم تفعيل الفرع");
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "حدث خطأ غير متوقع");
-      }
-    });
-  }
-
-  function handleEditSubmit(formData: FormData) {
-    startTransition(async () => {
-      try {
-        await updateBranchAction(branch.id, formData);
-        setEditOpen(false);
-        router.refresh();
-        toast.success("تم حفظ التعديلات");
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "تعذّر الحفظ");
       }
     });
   }
@@ -65,31 +52,39 @@ export function BranchRowActions({ branch }: { branch: Branch }) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>تعديل الفرع</DialogTitle></DialogHeader>
-          <form action={handleEditSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor={`name-${branch.id}`}>اسم الفرع</Label>
-              <Input id={`name-${branch.id}`} name="name" defaultValue={branch.name} required />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor={`city-${branch.id}`}>المدينة</Label>
-                <Input id={`city-${branch.id}`} name="city" defaultValue={branch.city} required />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={`country-${branch.id}`}>الدولة</Label>
-                <Input id={`country-${branch.id}`} name="country" defaultValue={branch.country} required />
-              </div>
-            </div>
-            <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end">
-              <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>إلغاء</Button>
-              <Button type="submit" disabled={pending}>{pending ? "جارٍ الحفظ..." : "حفظ"}</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* Controlled: opened from a menu item, so the dialog cannot own a nested trigger. */}
+      <FormDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        title="تعديل الفرع"
+        successMessage="تم حفظ التعديلات"
+        action={(formData) => updateBranchAction(branch.id, formData)}
+      >
+        <div className="space-y-1.5">
+          <Label htmlFor={`name-${branch.id}`}>اسم الفرع</Label>
+          <Input id={`name-${branch.id}`} name="name" defaultValue={branch.name} required />
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={`city-${branch.id}`}>المدينة</Label>
+            <Input id={`city-${branch.id}`} name="city" defaultValue={branch.city} required />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`country-${branch.id}`}>الدولة</Label>
+            <Input id={`country-${branch.id}`} name="country" defaultValue={branch.country} required />
+          </div>
+        </div>
+        {/* Same two optional fields as the create dialog, and deliberately the same order — the
+            edit form is where most branches will get a number, since they all predate the column. */}
+        <div className="space-y-1.5">
+          <Label htmlFor={`phone-${branch.id}`}>هاتف الفرع</Label>
+          <Input id={`phone-${branch.id}`} name="phone" dir="ltr" defaultValue={branch.phone ?? ""} placeholder="+967 77 123 4567" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`address-${branch.id}`}>عنوان الفرع</Label>
+          <Input id={`address-${branch.id}`} name="address" defaultValue={branch.address ?? ""} placeholder="الشارع، أقرب معلم" />
+        </div>
+      </FormDialog>
     </>
   );
 }

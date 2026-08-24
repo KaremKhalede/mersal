@@ -1,6 +1,7 @@
 import { requireCompanyUser } from "@/lib/auth";
 import { companyDashboard } from "@/modules/reports/service";
 import { financeSummary, getCurrentPlatformFee } from "@/modules/billing/service";
+import { collectedOnDay, businessToday } from "@/modules/collections/service";
 import { getBranchScope } from "@/lib/branch-scope";
 import { can } from "@/lib/rbac";
 import { StatCard } from "@/components/ui/stat-card";
@@ -12,11 +13,13 @@ import {
   Truck, CheckCircle2, AlertTriangle, MapPin, Wallet, Package, PackageCheck, ArrowLeft, type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { cn } from "@/lib/utils";
+import { cn, routeLabel } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { ar } from "date-fns/locale/ar";
 import { formatBusinessDateTime } from "@/lib/timezone";
 import type { ShipmentStatus } from "@/lib/enums";
+import { PageHeader } from "@/components/shell/page-header";
+import { formatYER } from "@/lib/money";
 
 type DashboardData = Awaited<ReturnType<typeof companyDashboard>>;
 type DashboardTrip = DashboardData["activeTripsList"][number];
@@ -46,14 +49,21 @@ export default async function CompanyDashboardPage() {
   const canSeeActivity = can(user, "reports", "view");
   const canSeeExceptions = can(user, "shipments", "updateStatus");
   const branchScope = getBranchScope(user);
-  const [data, finance, feePerCarton] = await Promise.all([
+  const today = businessToday();
+  const [data, finance, feePerCarton, collectedToday] = await Promise.all([
     companyDashboard(user.companyId!, branchScope),
     canSeeFinance ? financeSummary(user.companyId!, branchScope) : Promise.resolve(null),
     canSeeFinance ? getCurrentPlatformFee() : Promise.resolve(null),
+    // Not part of financeSummary any more: that version summed a cumulative column and counted
+    // every earlier instalment again on each day a shipment was touched. One definition of
+    // "collected" now, shared with the daily close sheet this figure links to.
+    canSeeFinance ? collectedOnDay(user.companyId!, today, { branchScope }) : Promise.resolve(0),
   ]);
 
   return (
     <div className="space-y-4">
+      <PageHeader title="لوحة التحكم" description="ما يحتاج متابعتك اليوم" />
+
       {/* Exceptions no longer get a permanent sidebar page — just this counter when there's
           something open, linking to the (still-existing, just no longer primary-nav) list. */}
       {data.exceptions > 0 && canSeeExceptions && (
@@ -94,24 +104,36 @@ export default async function CompanyDashboardPage() {
             </CardTitle>
             <Link href="/app/billing" className="text-xs text-primary hover:underline">التفاصيل والفواتير</Link>
           </CardHeader>
+          {/* All three figures are now doors, not decorations. A number a manager cannot open is a
+              number to look at rather than act on — the principle this dashboard already applied to
+              its status counters, applied here too now that each figure finally has somewhere to
+              lead. Each lands on the finance tab that explains it, and the customer/platform
+              separation survives the trip: two of these open المستحقات / إقفال اليوم, the third
+              opens رسوم المنصة, and no destination mixes the two. */}
           <CardContent className="grid grid-cols-3 divide-x divide-x-reverse text-center">
-            <div className="px-2">
-              <p className="text-lg font-bold text-success">{finance.collectedToday.toLocaleString()} ر.ي</p>
+            <Link href={`/app/billing?tab=close&date=${today}`} className="px-2 rounded-lg hover:bg-accent">
+              <p className="text-lg font-bold text-success">{formatYER(collectedToday)}</p>
               <p className="text-xs text-muted-foreground mt-0.5">المُحصّل اليوم</p>
-            </div>
-            <div className="px-2">
-              <p className="text-lg font-bold text-warning">{finance.outstanding.toLocaleString()} ر.ي</p>
+              <p className="text-2xs text-muted-foreground/70 mt-0.5">من قبض اليوم؟</p>
+            </Link>
+            {/* The figure used to be a dead end: it said how much is owed and offered no way to
+                find out by whom. It now opens the receivables tab, which groups the same population
+                by customer — same predicate on both sides (UNPAID_WHERE in modules/shipments), so
+                the screen this opens always adds up to the number that opened it. */}
+            <Link href="/app/billing?tab=receivables" className="px-2 rounded-lg hover:bg-accent">
+              <p className="text-lg font-bold text-warning">{formatYER(finance.outstanding)}</p>
               <p className="text-xs text-muted-foreground mt-0.5">المتبقي على العملاء</p>
-            </div>
-            <div className="px-2">
-              <p className="text-lg font-bold">{finance.platformFeesMTD.toLocaleString()} ر.ي</p>
+              <p className="text-2xs text-muted-foreground/70 mt-0.5">من عليه؟</p>
+            </Link>
+            <Link href="/app/billing?tab=platform" className="px-2 rounded-lg hover:bg-accent">
+              <p className="text-lg font-bold">{formatYER(finance.platformFeesMTD)}</p>
               <p className="text-xs text-muted-foreground mt-0.5">رسوم المنصة (هذا الشهر)</p>
               {feePerCarton != null && (
-                <p className="text-[0.7rem] text-muted-foreground/70 mt-0.5">
-                  {finance.cartonsMTD.toLocaleString()} كرتون × {feePerCarton.toLocaleString()} ر.ي
+                <p className="text-2xs text-muted-foreground/70 mt-0.5">
+                  {finance.cartonsMTD.toLocaleString()} كرتون × {formatYER(feePerCarton)}
                 </p>
               )}
-            </div>
+            </Link>
           </CardContent>
         </Card>
       )}
@@ -183,7 +205,7 @@ export default async function CompanyDashboardPage() {
                   </TableCell>
                   <TableCell>{s.customer.name}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">
-                    {s.loadBranch.city} ← {s.unloadBranch.city}
+                    {routeLabel(s.loadBranch.city, s.unloadBranch.city)}
                   </TableCell>
                   <TableCell>
                     <ShipmentStatusBadge status={s.status} />
@@ -237,7 +259,12 @@ function TripRow({ trip }: { trip: DashboardTrip }) {
           {atStop ? `في ${stop.branch.city} الآن` : `وصول إلى ${stop.branch.city} ${relative}`}
         </p>
       )}
-      <p className="mt-1 text-xs text-muted-foreground">{trip.shipmentCount} شحنة / {trip.cartonCount} كرتون</p>
+      {/* "من يقود أي رحلة" — the manager's first question about a live trip, and Trip.driverId has
+          always known the answer. */}
+      <p className="mt-1 text-xs text-muted-foreground">
+        {trip.shipmentCount} شحنة / {trip.cartonCount} كرتون
+        {trip.driver ? <> · {trip.driver.name}</> : <span className="text-warning"> · بلا سائق</span>}
+      </p>
     </Link>
   );
 }

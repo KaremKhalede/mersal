@@ -9,23 +9,51 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { reportProblemAction } from "../../../actions";
 
+/**
+ * What can be wrong, and when.
+ *
+ * `onlyWhen` is not tidiness — it is the difference between a menu that means something and one
+ * that offers the driver a lie. "كرتون ناقص" counts cartons that came off a truck, so it needs a
+ * shipment that was loaded; "شحنة لم تُحمّل" is only true of one that was not. Offering both for
+ * every shipment is how the second one ended up unreportable for months: the list it was shown next
+ * to contained only loaded shipments.
+ */
 const PROBLEM_TYPES = [
-  { value: "MISSING_CARTON", label: "كرتون ناقص" },
-  { value: "DAMAGED", label: "شحنة تالفة" },
-  { value: "NOT_LOADED", label: "شحنة لم تُحمّل" },
-  { value: "OTHER", label: "أخرى" },
-];
+  { value: "MISSING_CARTON", label: "كرتون ناقص", onlyWhen: "loaded" },
+  { value: "NOT_LOADED", label: "شحنة لم تُحمّل", onlyWhen: "not-loaded" },
+  { value: "DAMAGED", label: "شحنة تالفة", onlyWhen: "any" },
+  { value: "OTHER", label: "أخرى", onlyWhen: "any" },
+] as const;
 
-type Shipment = { id: string; shipmentNumber: string; totalCartons: number; cartons: { id: string; cartonIndex: number; cartonCode: string }[] };
+type Shipment = {
+  id: string;
+  shipmentNumber: string;
+  totalCartons: number;
+  cartons: { id: string; cartonIndex: number; cartonCode: string }[];
+  /** Whether this shipment is physically on the truck (its link has a loadedAt). */
+  loaded: boolean;
+};
 
 export function ReportProblemForm({ tripId, shipments }: { tripId: string; shipments: Shipment[] }) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [shipmentId, setShipmentId] = useState("");
-  const [problemType, setProblemType] = useState("MISSING_CARTON");
+  const [problemType, setProblemType] = useState("");
   const [missing, setMissing] = useState<Set<string>>(new Set());
 
   const selected = shipments.find((s) => s.id === shipmentId);
+  const types = PROBLEM_TYPES.filter(
+    (t) => t.onlyWhen === "any" || !selected || (t.onlyWhen === "loaded") === selected.loaded
+  );
+
+  /** Picking a shipment decides which problems are possible, so the type resets with it rather than
+   *  carrying a choice that no longer applies to what is being reported. */
+  function pickShipment(id: string) {
+    setShipmentId(id);
+    setMissing(new Set());
+    const next = shipments.find((s) => s.id === id);
+    setProblemType(next?.loaded ? "MISSING_CARTON" : "NOT_LOADED");
+  }
 
   function handleSubmit(formData: FormData) {
     startTransition(async () => {
@@ -40,23 +68,39 @@ export function ReportProblemForm({ tripId, shipments }: { tripId: string; shipm
     });
   }
 
+  // onSubmit, not <form action={...}> — the same trap FormDialog documents: React resets an
+  // uncontrolled form once a form action settles, *including when it failed*, so a rejected report
+  // came back with the note blank and the driver retyping it on a phone at a stop. The
+  // stops/vehicle/driver fields elsewhere in the app survive this only because they are controlled
+  // by state; `note` is not. Unreachable until now — the Select's `required` blocked the submit
+  // before the action ever ran.
   return (
-    <form action={handleSubmit} className="space-y-4">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleSubmit(new FormData(e.currentTarget));
+      }}
+      className="space-y-4"
+    >
       <div className="space-y-1.5">
-        <Label>الشحنة</Label>
-        <Select name="shipmentId" required value={shipmentId} onValueChange={setShipmentId}>
+        <Label required>الشحنة</Label>
+        <Select name="shipmentId" value={shipmentId} onValueChange={pickShipment}>
           <SelectTrigger className="h-12"><SelectValue placeholder="اختر الشحنة" /></SelectTrigger>
           <SelectContent>
-            {shipments.map((s) => <SelectItem key={s.id} value={s.id}>{s.shipmentNumber} ({s.totalCartons} كرتون)</SelectItem>)}
+            {shipments.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.shipmentNumber} ({s.totalCartons} كرتون){s.loaded ? "" : " — لم تُحمّل بعد"}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
       <div className="space-y-1.5">
         <Label>نوع المشكلة</Label>
-        <Select name="problemType" value={problemType} onValueChange={setProblemType}>
-          <SelectTrigger className="h-12"><SelectValue /></SelectTrigger>
+        <Select name="problemType" value={problemType} onValueChange={setProblemType} disabled={!selected}>
+          <SelectTrigger className="h-12"><SelectValue placeholder="اختر الشحنة أولاً" /></SelectTrigger>
           <SelectContent>
-            {PROBLEM_TYPES.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+            {types.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>

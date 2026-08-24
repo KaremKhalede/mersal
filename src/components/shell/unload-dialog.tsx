@@ -67,7 +67,10 @@ export function UnloadDialog({
         <span className={missingCount > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}>{missingCount} مفقود</span>
       </div>
 
-      <div className="max-h-[45vh] space-y-3 overflow-y-auto">
+      {/* No scroll box of its own any more: DialogBody scrolls the whole dialog body now, and a
+          45vh cap inside it made two nested scrollbars racing each other on a phone — the outer one
+          for the summary line, the inner one for the cartons. */}
+      <div className="space-y-3">
         {shipments.map((shipment) => (
           <div key={shipment.shipmentNumber} data-testid={`unload-shipment-${shipment.shipmentNumber}`} className="rounded-lg border p-3">
             <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">

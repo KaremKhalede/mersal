@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requirePlatformAdmin } from "@/lib/auth";
 import { requireCanPlatform } from "@/lib/rbac";
@@ -17,10 +16,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { monthValue, parseMonth, monthLabel } from "@/components/platform/month-options";
 import { formatBusinessDate } from "@/lib/timezone";
-import { Building2, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/shell/page-header";
+import { formatAmount, formatYER } from "@/lib/money";
 
-const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (n: number) => formatAmount(n, 2);
 
 const STATUS_STYLES: Record<PaymentStatus, string> = {
   PAID: "border-success/30 bg-success/15 text-success",
@@ -45,7 +45,7 @@ function Figure({ label, value, unit, tone }: { label: string; value: string; un
     <div className="rounded-xl border bg-card p-4 shadow-sm">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className={cn("mt-1 text-2xl font-bold leading-none tabular-nums", tone)}>{value}</p>
-      {unit && <p className="mt-1 text-[11px] text-muted-foreground">{unit}</p>}
+      {unit && <p className="mt-1 text-2xs text-muted-foreground">{unit}</p>}
     </div>
   );
 }
@@ -112,45 +112,21 @@ export default async function PlatformBillingCompanyPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <nav aria-label="breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-          <Link href="/platform" className="hover:text-foreground">الرئيسية</Link>
-          <ChevronLeft className="h-3.5 w-3.5" />
-          <Link href={backHref} className="hover:text-foreground">الفوترة</Link>
-          <ChevronLeft className="h-3.5 w-3.5" />
-          <span className="font-medium text-foreground">{data.company.name}</span>
-        </nav>
-        <Link href={backHref} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ChevronRight className="h-4 w-4" /> رجوع إلى الفوترة
-        </Link>
-      </div>
-
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-white"
-            style={{ backgroundColor: data.company.logoColor }}
-            aria-hidden="true"
-          >
-            <Building2 className="h-6 w-6" />
-          </span>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">{data.company.name}</h1>
-            <p className="text-sm text-muted-foreground">
-              <span dir="ltr">{data.company.slug}</span> · {monthLabel(selected)}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
+      <PageHeader
+        variant="record"
+        title={data.company.name}
+        description={`${data.company.slug} · ${monthLabel(selected)}`}
+        badge={
           <Badge variant="outline" className={cn("text-sm", STATUS_STYLES[data.status])}>
             {PAYMENT_STATUS_LABELS[data.status]}
           </Badge>
-          <GenerateInvoiceButton companyId={companyId} month={selectedValue} />
-        </div>
-      </header>
+        }
+        parent={{ label: "الفوترة", href: backHref }}
+        actions={<GenerateInvoiceButton companyId={companyId} month={selectedValue} />}
+      />
 
       <p className="rounded-lg border bg-muted/30 px-4 py-3 text-sm tabular-nums">
-        {data.cartons.toLocaleString("en-US")} كرتون × سعر الكرتون = <span className="font-bold">{money(data.due)} ر.ي</span>
+        {data.cartons.toLocaleString("en-US")} كرتون × سعر الكرتون = <span className="font-bold">{formatYER(data.due, 2)}</span>
       </p>
 
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
@@ -188,12 +164,12 @@ export default async function PlatformBillingCompanyPage({
                       <TableCell className="text-sm">{r.method ? PAYMENT_METHOD_LABELS[r.method] ?? r.method : "—"}</TableCell>
                       <TableCell className="text-sm text-muted-foreground" dir="ltr">{r.reference || "—"}</TableCell>
                       <TableCell>
-                        <span className="flex flex-col gap-0.5">
+                        <span className="flex flex-col gap-1">
                           <Badge variant="outline" className={SUBMISSION_STYLES[r.status]}>
                             {SUBMISSION_STATUS_LABELS[r.status]}
                           </Badge>
                           {r.status === "REJECTED" && r.rejectionReason && (
-                            <span className="text-[11px] text-muted-foreground">{r.rejectionReason}</span>
+                            <span className="text-2xs text-muted-foreground">{r.rejectionReason}</span>
                           )}
                         </span>
                       </TableCell>

@@ -11,7 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2, Sparkles, X, Package, Boxes } from "lucide-react";
 import { createTripAction, suggestShipmentsAction } from "../actions";
-import { TripWizardStepper } from "./stepper";
+import { StatCard } from "@/components/ui/stat-card";
+import { PageHeader } from "@/components/shell/page-header";
+import { routeLabel } from "@/lib/utils";
 
 type Branch = { id: string; name: string };
 type Driver = { id: string; name: string };
@@ -96,8 +98,7 @@ export function TripWizard({ branches, drivers }: { branches: Branch[]; drivers:
 
   return (
     <div className="space-y-4">
-      <TripWizardStepper current={2} />
-      <h2 className="text-xl font-bold">رحلة جديدة</h2>
+      <PageHeader title="رحلة جديدة" />
 
       <form action={handleSubmit} className="grid lg:grid-cols-[1fr_380px] gap-4 items-start">
         {/* Suggested shipments — renders first in DOM, lands at the visual start (right) in RTL */}
@@ -130,7 +131,7 @@ export function TripWizard({ branches, drivers }: { branches: Branch[]; drivers:
                   />
                   <span className="font-medium text-primary">{s.shipmentNumber}</span>
                   <span className="text-muted-foreground">{s.customer.name}</span>
-                  <span className="text-muted-foreground text-xs">{s.loadBranch.name} ← {s.unloadBranch.name}</span>
+                  <span className="text-muted-foreground text-xs">{routeLabel(s.loadBranch.name, s.unloadBranch.name)}</span>
                   <span className="ms-auto text-muted-foreground">{s.totalCartons} كرتون</span>
                 </label>
               ))}
@@ -142,11 +143,9 @@ export function TripWizard({ branches, drivers }: { branches: Branch[]; drivers:
               {loadingSuggestions && <p className="text-sm text-muted-foreground text-center py-8">جارٍ البحث عن الشحنات المطابقة...</p>}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-              <StatMini icon={Package} label="شحنات مطابقة للمسار" value={suggestions.length} />
-              <StatMini icon={Boxes} label="إجمالي الكراتين المطابقة" value={totalCartons} />
-              <StatMini icon={Package} label="شحنات محدّدة حالياً" value={selected.length} tone="primary" />
-              <StatMini icon={Boxes} label="كراتين محدّدة" value={selectedCartons} tone="primary" />
+            <div className="grid grid-cols-2 gap-4 pt-1">
+              <StatCard label="شحنات مطابقة للمسار" value={suggestions.length} unit="شحنة" icon={Package} />
+              <StatCard label="إجمالي الكراتين المطابقة" value={totalCartons} unit="كرتون" icon={Boxes} />
             </div>
           </CardContent>
         </Card>
@@ -184,7 +183,7 @@ export function TripWizard({ branches, drivers }: { branches: Branch[]; drivers:
                   {stops.map((stop, i) => (
                     <div key={i} data-testid={`new-trip-stop-${i}`} className="flex items-center gap-2 rounded-lg border p-2 flex-wrap">
                       <span className="w-5 shrink-0 text-center text-xs text-muted-foreground">{i + 1}</span>
-                      <Select name="stopBranchId" value={stop.branchId} onValueChange={(v) => updateStop(i, { branchId: v })} required>
+                      <Select name="stopBranchId" value={stop.branchId} onValueChange={(v) => updateStop(i, { branchId: v })}>
                         <SelectTrigger className="flex-1 min-w-28"><SelectValue placeholder="اختر الفرع" /></SelectTrigger>
                         <SelectContent>
                           {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
@@ -248,13 +247,3 @@ export function TripWizard({ branches, drivers }: { branches: Branch[]; drivers:
   );
 }
 
-function StatMini({ icon: Icon, label, value, tone = "muted" }: { icon: typeof Package; label: string; value: number; tone?: "muted" | "primary" }) {
-  return (
-    <div className="rounded-lg border p-2.5 text-center">
-      <p className={tone === "primary" ? "text-lg font-bold text-primary flex items-center justify-center gap-1" : "text-lg font-bold flex items-center justify-center gap-1"}>
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" /> {value}
-      </p>
-      <p className="text-[0.7rem] text-muted-foreground mt-0.5">{label}</p>
-    </div>
-  );
-}

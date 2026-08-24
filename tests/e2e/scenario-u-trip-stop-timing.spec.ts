@@ -10,26 +10,48 @@ test.describe("Scenario U — trip stop on-time / at-risk / late", () => {
   test("stopTiming() rule: every branch of the deterministic classification", () => {
     const now = new Date("2026-01-01T12:00:00Z");
 
+    const at = (offsetMin: number) => new Date(now.getTime() + offsetMin * MIN);
+    const stop = (plannedArrival: Date | null, actualArrival: Date | null, actualDeparture: Date | null = null) => ({
+      plannedArrival,
+      actualArrival,
+      actualDeparture,
+    });
+
     // No plannedArrival at all -> insufficient data, no signal.
-    expect(stopTiming(null, null, now)).toBeNull();
+    expect(stopTiming(stop(null, null), now)).toBeNull();
 
     // Not yet arrived, still before planned time -> on time.
-    expect(stopTiming(new Date(now.getTime() + 10 * MIN), null, now)).toBe("ON_TIME");
+    expect(stopTiming(stop(at(10), null), now)).toBe("ON_TIME");
     // Not yet arrived, exactly at planned time (diff == 0) -> on time.
-    expect(stopTiming(new Date(now.getTime()), null, now)).toBe("ON_TIME");
+    expect(stopTiming(stop(at(0), null), now)).toBe("ON_TIME");
     // Not yet arrived, 1 minute past planned -> at risk.
-    expect(stopTiming(new Date(now.getTime() - 1 * MIN), null, now)).toBe("AT_RISK");
+    expect(stopTiming(stop(at(-1), null), now)).toBe("AT_RISK");
     // Not yet arrived, exactly at the at-risk boundary (30 min past) -> still at risk (<=).
-    expect(stopTiming(new Date(now.getTime() - AT_RISK_MINUTES * MIN), null, now)).toBe("AT_RISK");
+    expect(stopTiming(stop(at(-AT_RISK_MINUTES), null), now)).toBe("AT_RISK");
     // Not yet arrived, just past the boundary -> late.
-    expect(stopTiming(new Date(now.getTime() - (AT_RISK_MINUTES + 1) * MIN), null, now)).toBe("LATE");
+    expect(stopTiming(stop(at(-(AT_RISK_MINUTES + 1)), null), now)).toBe("LATE");
 
     // Arrived exactly on time or early -> on time, regardless of how early.
-    expect(stopTiming(new Date(now.getTime()), new Date(now.getTime() - 60 * MIN), now)).toBe("ON_TIME");
+    expect(stopTiming(stop(at(0), at(-60)), now)).toBe("ON_TIME");
     // Arrived even 1 minute late -> late outright, no "at risk" state once it's already happened.
-    expect(stopTiming(new Date(now.getTime() - 1 * MIN), new Date(now.getTime()), now)).toBe("LATE");
+    expect(stopTiming(stop(at(-1), at(0)), now)).toBe("LATE");
     // Arrived well past planned -> late.
-    expect(stopTiming(new Date(now.getTime() - 120 * MIN), new Date(now.getTime()), now)).toBe("LATE");
+    expect(stopTiming(stop(at(-120), at(0)), now)).toBe("LATE");
+
+    // ---- the departure fallback -------------------------------------------------------------
+    // A stop with no recorded arrival but a recorded departure is settled: the truck was there no
+    // later than it left, so the clock stops there instead of running on against `now`.
+    expect(stopTiming(stop(at(0), null, at(-30)), now)).toBe("ON_TIME");
+    expect(stopTiming(stop(at(-10), null, at(0)), now)).toBe("LATE");
+
+    // THE regression this fallback exists for: a stop that departed on time days ago must not get
+    // later every time the page is opened. Same row, two different "now"s, same verdict.
+    const departedOnTime = stop(at(-2 * 24 * 60), null, at(-2 * 24 * 60 - 5));
+    expect(stopTiming(departedOnTime, now)).toBe("ON_TIME");
+    expect(stopTiming(departedOnTime, new Date(now.getTime() + 7 * 24 * 60 * MIN))).toBe("ON_TIME");
+
+    // A real arrival always wins over the departure fallback, even when the two disagree.
+    expect(stopTiming(stop(at(-60), at(-90), at(0)), now)).toBe("ON_TIME");
   });
 
   test("trip detail page shows the correct badge per stop, using the real plannedArrival/actualArrival data", async ({ page }) => {

@@ -46,6 +46,12 @@ function DecorativeBarcode({ value }: { value: string }) {
   );
 }
 
+/**
+ * Deliberately exempt from the app's type scale. Every `text-[Npx]` below is a physical size on a
+ * 100×150mm thermal label read at arm's length off a stacked carton — not a step on a screen scale
+ * shared with tables and dialogs. Mapping these onto text-2xs/xs/sm would resize printed output to
+ * match an on-screen rhythm this surface does not have. Change them against a printed proof.
+ */
 export function CartonPrintCard({
   companyName,
   shipmentNumber,

@@ -6,10 +6,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Link from "next/link";
-import { formatBusinessStamp } from "@/lib/timezone";
+import { formatDateStamp } from "@/lib/timezone";
+import { formatPhoneDisplay } from "@/lib/phone";
 import { SHIPMENT_EVENT_LABELS, NOTIFICATION_RECIPIENT_LABELS, type ShipmentEvent, type NotificationRecipient } from "@/lib/enums";
 import { can } from "@/lib/rbac";
 import { RetryNotificationButton } from "./retry-button";
+import { Button } from "@/components/ui/button";
+import { Wrench } from "lucide-react";
+import { PageHeader } from "@/components/shell/page-header";
+import { EmptyState, TableEmpty } from "@/components/feedback/empty-state";
+import { BellOff } from "lucide-react";
 
 const STATUS_LABELS: Record<string, string> = { SENT: "أُرسلت", FAILED: "فشلت", PENDING: "قيد الإرسال", SKIPPED: "متخطاة" };
 const STATUS_CLASSES: Record<string, string> = {
@@ -33,7 +39,7 @@ function reasonText(error: string) {
   return error;
 }
 
-function NotificationTable({ logs, emptyText, canRetry }: { logs: LogRow[]; emptyText: string; canRetry: boolean }) {
+function NotificationTable({ logs, emptyTitle, emptyText, canRetry }: { logs: LogRow[]; emptyTitle: string; emptyText: string; canRetry: boolean }) {
   return (
     <Card>
       <CardContent className="p-0">
@@ -60,15 +66,33 @@ function NotificationTable({ logs, emptyText, canRetry }: { logs: LogRow[]; empt
             {logs.map((l) => (
               <TableRow key={l.id}>
                 {/* Only FAILED is retryable. SENT is terminal (retrying it is the duplicate this
-                    log exists to prevent) and SKIPPED needs a data fix, not another attempt. */}
-                {canRetry && <TableCell>{l.status === "FAILED" ? <RetryNotificationButton logId={l.id} /> : null}</TableCell>}
+                    log exists to prevent) and SKIPPED needs a data fix, not another attempt.
+                    
+                    But "not retryable" is not the same as "nothing to do", and this cell used to be
+                    empty for every SKIPPED row — the screen stated a reason ("لا يوجد رقم جوال
+                    للمستلم") and then offered no way to act on it. The fix for every skip reason
+                    this app generates is the same: correct the number on the shipment. So the row
+                    points there, which is a real next step rather than a blank. */}
+                {canRetry && (
+                  <TableCell>
+                    {l.status === "FAILED" ? (
+                      <RetryNotificationButton logId={l.id} />
+                    ) : l.status === "SKIPPED" && l.shipmentId ? (
+                      <Button asChild variant="outline" size="sm">
+                        <Link href={`/app/shipments/${l.shipmentId}`}>
+                          <Wrench className="h-3.5 w-3.5" /> تصحيح البيانات
+                        </Link>
+                      </Button>
+                    ) : null}
+                  </TableCell>
+                )}
                 <TableCell>{l.shipmentId ? <Link href={`/app/shipments/${l.shipmentId}`} className="text-primary hover:underline">{l.shipment?.shipmentNumber}</Link> : "—"}</TableCell>
                 <TableCell className="text-sm">{SHIPMENT_EVENT_LABELS[l.event as ShipmentEvent] ?? l.event}</TableCell>
                 {/* Without this the log is ambiguous the moment one event reaches two people: two
                     rows, same event, different numbers, no way to tell which is the receiver's. */}
                 <TableCell className="text-sm">{NOTIFICATION_RECIPIENT_LABELS[l.recipient as NotificationRecipient] ?? l.recipient}</TableCell>
                 <TableCell className="hidden max-w-[12rem] truncate text-sm md:table-cell">{l.message}</TableCell>
-                <TableCell dir="ltr" className="hidden text-sm md:table-cell">{l.toPhone || "—"}</TableCell>
+                <TableCell dir="ltr" className="hidden text-sm md:table-cell">{formatPhoneDisplay(l.toPhone)}</TableCell>
                 <TableCell className="align-top">
                   <Badge variant="outline" className={STATUS_CLASSES[l.status] ?? STATUS_CLASSES.FAILED}>{STATUS_LABELS[l.status] ?? l.status}</Badge>
                   {/* A skipped/failed row without its reason leaves the employee guessing whether the
@@ -86,10 +110,14 @@ function NotificationTable({ logs, emptyText, canRetry }: { logs: LogRow[]; empt
                     </p>
                   )}
                 </TableCell>
-                <TableCell className="hidden text-xs text-muted-foreground md:table-cell">{formatBusinessStamp(l.createdAt)}</TableCell>
+                <TableCell className="hidden text-xs text-muted-foreground md:table-cell">{formatDateStamp(l.createdAt)}</TableCell>
               </TableRow>
             ))}
-            {logs.length === 0 && <TableRow><TableCell colSpan={canRetry ? 8 : 7} className="text-center text-muted-foreground py-8">{emptyText}</TableCell></TableRow>}
+            {logs.length === 0 && (
+              <TableEmpty colSpan={canRetry ? 8 : 7}>
+                <EmptyState icon={BellOff} title={emptyTitle} description={emptyText} />
+              </TableEmpty>
+            )}
           </TableBody>
         </Table>
       </CardContent>
@@ -97,14 +125,20 @@ function NotificationTable({ logs, emptyText, canRetry }: { logs: LogRow[]; empt
   );
 }
 
+const NOTIFICATION_LIMIT = 100;
+
 export default async function NotificationsPage() {
   const user = await requireCompanyUser();
-  const logs = await prisma.notificationLog.findMany({
-    where: { companyId: user.companyId! },
-    include: { shipment: true },
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  });
+  // Same honesty problem the activity log had: 100 rows, no word about the rest.
+  const [logs, totalLogs] = await Promise.all([
+    prisma.notificationLog.findMany({
+      where: { companyId: user.companyId! },
+      include: { shipment: true },
+      orderBy: { createdAt: "desc" },
+      take: NOTIFICATION_LIMIT,
+    }),
+    prisma.notificationLog.count({ where: { companyId: user.companyId! } }),
+  ]);
 
   // Same data, two views: rows that actually need a human's attention vs. the full send history.
   const needsAttention = logs.filter((l) => l.status === "FAILED" || l.status === "SKIPPED");
@@ -116,14 +150,15 @@ export default async function NotificationsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-bold">الإشعارات</h2>
-        <p className="text-sm text-muted-foreground">رسائل واتساب المُرسلة للمرسِلين والمستلمين</p>
-      </div>
+      <PageHeader title="الإشعارات" description="رسائل واتساب المُرسلة للمرسِلين والمستلمين" />
 
       <Tabs defaultValue="center" dir="rtl">
         <TabsList>
-          <TabsTrigger value="center">مركز الإشعارات {needsAttention.length > 0 && `(${needsAttention.length})`}</TabsTrigger>
+          {/* The count on this tab is the same FAILED-only number the topbar bell shows. It used to be
+              FAILED + SKIPPED, so the bell said 1 while the tab said (2) — two different answers to
+              "what needs my attention" on one screen. SKIPPED is still listed and still counted, in
+              its own chip below, where it reads as context rather than as a task. */}
+          <TabsTrigger value="center">مركز الإشعارات {failedCount > 0 && `(${failedCount})`}</TabsTrigger>
           <TabsTrigger value="log">سجل الإرسال</TabsTrigger>
         </TabsList>
         <TabsContent value="center" className="space-y-3 pt-3">
@@ -135,10 +170,15 @@ export default async function NotificationsPage() {
               <span className="rounded-lg border px-3 py-1.5 text-muted-foreground">متخطاة: {skippedCount}</span>
             </div>
           )}
-          <NotificationTable logs={needsAttention} emptyText="لا توجد إشعارات تحتاج انتباهك حالياً" canRetry={canRetry} />
+          <NotificationTable logs={needsAttention} emptyTitle="كل الرسائل وصلت" emptyText="لا توجد رسائل فشلت أو تُخطّيت — لا شيء يحتاج انتباهك هنا الآن." canRetry={canRetry} />
         </TabsContent>
-        <TabsContent value="log" className="pt-3">
-          <NotificationTable logs={logs} emptyText="لا توجد إشعارات بعد" canRetry={canRetry} />
+        <TabsContent value="log" className="space-y-2 pt-3">
+          <NotificationTable logs={logs} emptyTitle="لا توجد رسائل بعد" emptyText="تُرسَل رسائل واتساب تلقائياً عند تسجيل الشحنات ووصولها وتسليمها، وتظهر هنا." canRetry={canRetry} />
+          {totalLogs > logs.length && (
+            <p className="text-xs text-muted-foreground">
+              يعرض أحدث {logs.length.toLocaleString("en-US")} رسالة من أصل {totalLogs.toLocaleString("en-US")}.
+            </p>
+          )}
         </TabsContent>
       </Tabs>
     </div>

@@ -118,7 +118,7 @@ test.describe("Scenario X — settlement records and invoice paid state", () => 
 
     // --- Company side: report, do not settle -------------------------------------------------
     await login(page, tenant.adminEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await page.click('button:has-text("الإبلاغ عن دفعة")');
     await page.fill('input[name="amount"]', "50");
     await page.fill('input[name="reference"]', "TRX-9911");
@@ -155,7 +155,7 @@ test.describe("Scenario X — settlement records and invoice paid state", () => 
     const { tenant } = await setupInvoice(4);
 
     await login(page, tenant.adminEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
 
     await expect(page.locator('button:has-text("سداد الفاتورة")')).toHaveCount(0);
     await expect(page.locator('button:has-text("إصدار فاتورة")')).toHaveCount(0);

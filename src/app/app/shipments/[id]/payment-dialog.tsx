@@ -7,13 +7,31 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FormDialog } from "@/components/shell/form-dialog";
 import { Wallet } from "lucide-react";
 import { recordPaymentAction } from "../actions";
+import { formatYER } from "@/lib/money";
 
-export function PaymentDialog({ shipmentId, amountPaid, shippingPrice }: { shipmentId: string; amountPaid: number; shippingPrice: number | null }) {
+/** `open`/`onOpenChange` are for the handover flow, which opens this dialog itself once a shipment
+ *  has been handed over with a balance still on it (see DeliveryProofDialog). Left undefined, the
+ *  dialog behaves exactly as before: its own button, its own state. */
+export function PaymentDialog({
+  shipmentId,
+  amountPaid,
+  shippingPrice,
+  open,
+  onOpenChange,
+}: {
+  shipmentId: string;
+  amountPaid: number;
+  shippingPrice: number | null;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
   return (
     <FormDialog
-      trigger={<Button size="sm" variant="outline"><Wallet className="h-4 w-4" /> تسجيل دفعة</Button>}
+      open={open}
+      onOpenChange={onOpenChange}
+      trigger={open === undefined ? <Button size="sm" variant="outline"><Wallet className="h-4 w-4" /> تسجيل دفعة</Button> : undefined}
       title="تسجيل دفعة"
-      description={shippingPrice != null ? `أجرة الشحن: ${shippingPrice} ر.ي — المدفوع حالياً: ${amountPaid} ر.ي` : `المدفوع حالياً: ${amountPaid} ر.ي`}
+      description={shippingPrice != null ? `أجرة الشحن: ${formatYER(shippingPrice)} — المدفوع حالياً: ${formatYER(amountPaid)}` : `المدفوع حالياً: ${formatYER(amountPaid)}`}
       action={recordPaymentAction}
     >
       <input type="hidden" name="shipmentId" value={shipmentId} />

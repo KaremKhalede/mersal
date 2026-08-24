@@ -7,12 +7,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ActiveBadge } from "@/components/ui/status-badge";
 import { Pagination } from "@/components/ui/pagination";
-import { Users, User } from "lucide-react";
+import { User, Contact } from "lucide-react";
 import Link from "next/link";
-import { formatBusinessDateTime } from "@/lib/timezone";
+import { formatDate } from "@/lib/timezone";
+import { formatPhoneDisplay } from "@/lib/phone";
 import { CustomerFilters } from "./filters";
 import { CustomerRowActions } from "./customer-row-actions";
 import { AddCustomerDialog } from "./add-customer-dialog";
+import { PageHeader } from "@/components/shell/page-header";
+import { EmptyState, NoResults, TableEmpty } from "@/components/feedback/empty-state";
 
 const PAGE_SIZE = 10;
 
@@ -39,19 +42,11 @@ export default async function CustomersPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Users className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold">العملاء</h2>
-            <p className="text-sm text-muted-foreground">إدارة عملاء المؤسسة ومعلومات التواصل الخاصة بهم.</p>
-          </div>
-        </div>
-
-        <AddCustomerDialog branches={branches} />
-      </div>
+      <PageHeader
+        title="العملاء"
+        description="إدارة عملاء المؤسسة ومعلومات التواصل الخاصة بهم."
+        actions={<AddCustomerDialog branches={branches} />}
+      />
 
       <CustomerFilters branches={branches} branchId={sp.branchId} status={sp.status} search={sp.q} showBranchFilter={!ownScope} />
 
@@ -75,7 +70,7 @@ export default async function CustomersPage({
                 return (
                   <TableRow key={c.id}>
                     <TableCell>
-                      <Link href={`/app/customers/${c.id}`} className="flex items-center gap-2.5">
+                      <Link href={`/app/customers/${c.id}`} className="flex items-center gap-2">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
                           <User className="h-4 w-4" />
                         </span>
@@ -85,12 +80,12 @@ export default async function CustomersPage({
                         </span>
                       </Link>
                     </TableCell>
-                    <TableCell dir="ltr" className="text-start text-muted-foreground">{c.phone}</TableCell>
+                    <TableCell dir="ltr" className="text-start text-muted-foreground">{formatPhoneDisplay(c.phone)}</TableCell>
                     <TableCell>{c._count.shipments.toLocaleString()}</TableCell>
                     <TableCell>
                       {lastShipment ? (
                         <div className="text-xs">
-                          <p className="text-muted-foreground">{formatBusinessDateTime(lastShipment.createdAt, { day: "2-digit", month: "2-digit", year: "numeric" })}</p>
+                          <p className="text-muted-foreground">{formatDate(lastShipment.createdAt)}</p>
                           <Link href={`/app/shipments/${lastShipment.id}`} className="font-medium text-primary hover:underline">{lastShipment.shipmentNumber}</Link>
                         </div>
                       ) : (
@@ -111,9 +106,18 @@ export default async function CustomersPage({
                 );
               })}
               {customers.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">لا يوجد عملاء مطابقون</TableCell>
-                </TableRow>
+                <TableEmpty colSpan={7}>
+                  {sp.q || sp.status || sp.branchId ? (
+                    <NoResults resetHref="/app/customers" />
+                  ) : (
+                    <EmptyState
+                      icon={Contact}
+                      title="لا يوجد عملاء بعد"
+                      description="يُنشأ العميل تلقائياً مع أول شحنة، أو أضفه يدوياً من هنا."
+                      action={<AddCustomerDialog branches={branches} />}
+                    />
+                  )}
+                </TableEmpty>
               )}
             </TableBody>
           </Table>

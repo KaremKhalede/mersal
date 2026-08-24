@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Sparkles } from "lucide-react";
 import { assignShipmentAction } from "../actions";
 
@@ -73,7 +73,10 @@ export function AssignShipmentDialog({ tripId, shipments }: { tripId: string; sh
           </button>
         )}
 
-        <div className="max-h-80 overflow-y-auto space-y-1">
+        {/* DialogBody rather than its own max-h-80 scroller: this dialog is hand-rolled (no
+            FormDialog — it submits through a transition, not a form), so it has to opt into the
+            same header-fixed / body-scrolls / footer-fixed shape explicitly. */}
+        <DialogBody className="space-y-1">
           {shipments.map((s) => (
             <label key={s.id} className="flex items-center gap-3 rounded-lg border p-2 text-sm cursor-pointer hover:bg-accent">
               <Checkbox
@@ -86,7 +89,7 @@ export function AssignShipmentDialog({ tripId, shipments }: { tripId: string; sh
             </label>
           ))}
           {shipments.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">لا توجد شحنات مطابقة لهذا المسار حالياً</p>}
-        </div>
+        </DialogBody>
         <DialogFooter>
           <Button disabled={pending || selected.length === 0} onClick={submit}>
             {pending ? "جارٍ الإضافة..." : `إضافة (${selected.length})`}

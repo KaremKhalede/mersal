@@ -1,11 +1,11 @@
-import Link from "next/link";
-import { requirePlatformAdmin } from "@/lib/auth";
-import { requireCanPlatform } from "@/lib/rbac";
-import { platformDashboard } from "@/modules/companies/service";
-import { DonutChart } from "@/components/charts/donut-chart";
-import { AreaChart } from "@/components/charts/area-chart";
-import { MonthPicker } from "@/components/platform/month-picker";
-import { monthOptions, monthValue, parseMonth } from "@/components/platform/month-options";
+import Link from"next/link";
+import { requirePlatformAdmin } from"@/lib/auth";
+import { requireCanPlatform } from"@/lib/rbac";
+import { platformDashboard } from"@/modules/companies/service";
+import { DonutChart } from"@/components/charts/donut-chart";
+import { AreaChart } from"@/components/charts/area-chart";
+import { MonthPicker } from"@/components/platform/month-picker";
+import { monthOptions, monthValue, parseMonth } from"@/components/platform/month-options";
 import {
   Users,
   Building2,
@@ -17,55 +17,20 @@ import {
   AlertCircle,
   Receipt,
   PauseCircle,
-} from "lucide-react";
+} from"lucide-react";
+import { StatCard } from"@/components/ui/stat-card";
+import { PageHeader } from"@/components/shell/page-header";
 
 function Delta({ value, suffix }: { value: number | null; suffix: string }) {
-  if (value === null) return <p className="text-[11px] text-muted-foreground">لا توجد بيانات للمقارنة</p>;
+  if (value === null) return <p className="text-2xs text-muted-foreground">لا توجد بيانات للمقارنة</p>;
   const up = value >= 0;
   const Icon = up ? TrendingUp : TrendingDown;
   return (
-    <p className={`flex items-center gap-1 text-[11px] font-medium ${up ? "text-success" : "text-destructive"}`}>
+    <p className={`flex items-center gap-1 text-2xs font-medium ${up ?"text-success" :"text-destructive"}`}>
       <Icon className="h-3 w-3 shrink-0" />
-      <span className="tabular-nums">{up ? "+" : ""}{value}%</span>
+      <span className="tabular-nums">{up ?"+" :""}{value}%</span>
       <span className="text-muted-foreground">{suffix}</span>
     </p>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  unit,
-  icon: Icon,
-  tone,
-  footer,
-  delay,
-}: {
-  label: string;
-  value: string;
-  unit: string;
-  icon: React.ComponentType<{ className?: string }>;
-  tone: string;
-  footer: React.ReactNode;
-  delay: number;
-}) {
-  return (
-    <div
-      style={{ animationDelay: `${delay}ms` }}
-      className="animate-in rounded-xl border bg-card p-4 shadow-sm fade-in slide-in-from-bottom-3 duration-500 transition-all [animation-fill-mode:backwards] hover:-translate-y-0.5 hover:shadow-md motion-reduce:animate-none motion-reduce:hover:translate-y-0"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-1 text-2xl font-bold leading-none tabular-nums">{value}</p>
-          <p className="mt-1 text-[11px] text-muted-foreground">{unit}</p>
-        </div>
-        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tone}`}>
-          <Icon className="h-5 w-5" />
-        </span>
-      </div>
-      <div className="mt-3">{footer}</div>
-    </div>
   );
 }
 
@@ -84,7 +49,7 @@ export default async function PlatformDashboardPage({
   searchParams: Promise<{ month?: string }>;
 }) {
   const me = await requirePlatformAdmin();
-  requireCanPlatform(me, "dashboard", "view");
+  requireCanPlatform(me,"dashboard","view");
   const { month: rawMonth } = await searchParams;
 
   const now = new Date();
@@ -95,93 +60,87 @@ export default async function PlatformDashboardPage({
   const data = await platformDashboard(selected);
 
   const statusSlices = [
-    { label: "نشطة", value: data.activeCompanies, color: "var(--color-success)" },
-    { label: "متوقفة", value: data.suspendedCompanies, color: "var(--color-warning)" },
+    { label:"نشطة", value: data.activeCompanies, color:"var(--color-success)" },
+    { label:"متوقفة", value: data.suspendedCompanies, color:"var(--color-warning)" },
   ];
 
   const alerts = [
     {
-      key: "dormant",
-      label: "شركات لم تستخدم النظام منذ 7 أيام",
+      key:"dormant",
+      label:"شركات لم تستخدم النظام منذ 7 أيام",
       count: data.dormantCompanies,
-      href: "/platform/companies",
+      href:"/platform/companies",
       icon: AlertCircle,
-      tone: "bg-destructive/10 text-destructive",
+      tone:"bg-destructive/10 text-destructive",
     },
     {
-      key: "unpaid",
-      label: "فواتير مستحقة الدفع",
+      key:"unpaid",
+      label:"فواتير مستحقة الدفع",
       count: data.unpaidInvoices,
-      href: "/platform/billing",
+      href:"/platform/billing",
       icon: Receipt,
-      tone: "bg-warning/15 text-warning",
+      tone:"bg-warning/15 text-warning",
     },
     {
-      key: "suspended",
-      label: "شركات متوقفة حالياً",
+      key:"suspended",
+      label:"شركات متوقفة حالياً",
       count: data.suspendedCompanies,
-      href: "/platform/companies",
+      href:"/platform/companies",
       icon: PauseCircle,
-      tone: "bg-primary/10 text-primary",
+      tone:"bg-primary/10 text-primary",
     },
   ];
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight">لوحة التحكم</h1>
-          <p className="text-sm text-muted-foreground">نظرة عامة على المنصة</p>
-        </div>
-        <MonthPicker months={months} value={selectedValue} />
-      </header>
+    <div className="space-y-4">
+      <PageHeader
+        title="لوحة التحكم"
+        description="نظرة عامة على المنصة"
+        actions={<MonthPicker months={months} value={selectedValue} />}
+      />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
+        <StatCard
           label="إجمالي الشركات"
           value={data.totalCompanies.toLocaleString("en-US")}
           unit="شركة"
           icon={Users}
-          tone="bg-primary/10 text-primary"
-          delay={0}
-          footer={<p className="text-[11px] text-muted-foreground">منذ بداية المنصة</p>}
+          tone="primary"
+          footer={<p className="text-2xs text-muted-foreground">منذ بداية المنصة</p>}
         />
-        <MetricCard
+        <StatCard
           label="الشركات النشطة"
           value={data.activeCompanies.toLocaleString("en-US")}
           unit="شركة"
           icon={Building2}
-          tone="bg-warning/15 text-warning"
-          delay={60}
+          tone="warning"
           footer={
-            <p className="text-[11px] font-medium text-primary">
-              <span className="tabular-nums">{data.activeShare}%</span>{" "}
+            <p className="text-2xs font-medium text-primary">
+              <span className="tabular-nums">{data.activeShare}%</span>{""}
               <span className="text-muted-foreground">من إجمالي الشركات</span>
             </p>
           }
         />
-        <MetricCard
+        <StatCard
           label="إيرادات هذا الشهر"
           value={data.revenue.toLocaleString("en-US")}
           unit="ر.ي"
           icon={FileText}
-          tone="bg-primary/10 text-primary"
-          delay={120}
+          tone="primary"
           footer={<Delta value={data.revenueChange} suffix="عن الشهر الماضي" />}
         />
-        <MetricCard
+        <StatCard
           label="الكراتين هذا الشهر"
           value={data.cartonsThisMonth.toLocaleString("en-US")}
           unit="كرتون"
           icon={Package}
-          tone="bg-success/15 text-success"
-          delay={180}
+          tone="success"
           footer={<Delta value={data.cartonsChange} suffix="عن الشهر الماضي" />}
         />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <section className="animate-in rounded-xl border bg-card p-5 shadow-sm fade-in slide-in-from-bottom-3 duration-500 [animation-fill-mode:backwards] motion-reduce:animate-none" style={{ animationDelay: "240ms" }}>
+        <section className="rounded-xl border bg-card p-4 shadow-sm">
           <h2 className="mb-4 text-sm font-bold">حالة الشركات</h2>
           <div className="flex flex-wrap items-center justify-center gap-6">
             <DonutChart slices={statusSlices} total={data.totalCompanies} caption="إجمالي الشركات" />
@@ -202,7 +161,7 @@ export default async function PlatformDashboardPage({
           </div>
         </section>
 
-        <section className="animate-in rounded-xl border bg-card p-5 shadow-sm fade-in slide-in-from-bottom-3 duration-500 [animation-fill-mode:backwards] motion-reduce:animate-none" style={{ animationDelay: "300ms" }}>
+        <section className="rounded-xl border bg-card p-4 shadow-sm">
           <h2 className="mb-4 text-sm font-bold">استخدام الكراتين</h2>
           <AreaChart series={data.series} labelCurrent="الحالي" labelPrevious="الشهر الماضي" />
           <div className="mt-5 border-t pt-3">
@@ -211,7 +170,7 @@ export default async function PlatformDashboardPage({
         </section>
       </div>
 
-      <section className="animate-in rounded-xl border bg-card p-5 shadow-sm fade-in slide-in-from-bottom-3 duration-500 [animation-fill-mode:backwards] motion-reduce:animate-none" style={{ animationDelay: "360ms" }}>
+      <section className="rounded-xl border bg-card p-4 shadow-sm">
         <h2 className="mb-4 text-sm font-bold">تنبيهات مهمة</h2>
         <ul className="space-y-2.5">
           {alerts.map((a) => (

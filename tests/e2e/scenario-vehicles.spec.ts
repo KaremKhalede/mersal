@@ -16,7 +16,7 @@ test.describe("Vehicles page", () => {
 
     await login(page, tenant.adminEmail);
     await page.goto("/app/vehicles");
-    await expect(page.locator("h2", { hasText: "المركبات" })).toBeVisible();
+    await expect(page.locator("h1", { hasText: "المركبات" })).toBeVisible();
     const row = page.locator("tr", { hasText: "TEST-1001" });
     await expect(row).toBeVisible();
     await expect(row.locator("td").nth(1)).toHaveText("شاحنة");

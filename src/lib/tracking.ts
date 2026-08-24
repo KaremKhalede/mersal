@@ -48,7 +48,9 @@ export function newTrackingToken(): string {
 /** Absolute tracking URL for outbound messages — see src/lib/app-url.ts for why APP_URL is not
  *  allowed to be missing in production. */
 export function trackingUrlFor(token: string): string {
-  return absoluteUrl(`/track/${token}`);
+  // "/t/" not "/track/": the branded lookup owns /track/<company>, and this URL spends its whole
+  // life inside a WhatsApp message where every character shows.
+  return absoluteUrl(`/t/${token}`);
 }
 
 /**

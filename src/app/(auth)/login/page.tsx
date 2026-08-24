@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { LoginForm } from "./login-form";
-import { Package } from "lucide-react";
+import { Package, PackageSearch } from "lucide-react";
 
 export default function LoginPage() {
   return (
@@ -13,6 +14,16 @@ export default function LoginPage() {
           <p className="text-sm text-muted-foreground">تسجيل الدخول لإدارة عمليات الشحن</p>
         </div>
         <LoginForm />
+
+        {/* The other direction of the same door. A customer who was given this URL, or who
+            bookmarked it back when "/" landed here, needs a way across to tracking without
+            guessing a path. */}
+        <Link
+          href="/track"
+          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <PackageSearch className="h-4 w-4" /> تتبّع شحنة
+        </Link>
       </div>
     </div>
   );

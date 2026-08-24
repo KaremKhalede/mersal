@@ -68,7 +68,7 @@ export function DonutChart({
       </svg>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
         <span className="text-2xl font-bold tabular-nums">{total.toLocaleString("en-US")}</span>
-        <span className="text-[11px] text-muted-foreground">{caption}</span>
+        <span className="text-2xs text-muted-foreground">{caption}</span>
       </div>
     </div>
   );

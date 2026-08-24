@@ -12,12 +12,21 @@ export default async function ReportProblemPage({ params }: { params: Promise<{ 
   const trip = await prisma.trip.findFirst({ where: { id, driverId: user.id } });
   if (!trip) notFound();
 
+  /*
+    Everything still open on this trip — loaded or not.
+
+    This used to require `loadedAt: { not: null }`, which quietly made one of the four problem types
+    unreportable: "شحنة لم تُحمّل" can only ever be true of a shipment that was NOT loaded, and those
+    were the exact rows the query excluded. A driver standing at a branch where a listed shipment is
+    not there had no way to say so — the option existed in the menu and matched nothing in the list.
+
+    `unloadedAt: null` is the right boundary: a shipment already taken off the truck is finished
+    business for this trip.
+  */
   const links = await prisma.tripShipmentStop.findMany({
-    where: { tripId: id, loadedAt: { not: null }, unloadedAt: null },
+    where: { tripId: id, unloadedAt: null },
     include: { shipment: { include: { cartons: { orderBy: { cartonIndex: "asc" }, select: { id: true, cartonIndex: true, cartonCode: true } } } } },
   });
-
-  const shipments = links.map((l) => l.shipment);
 
   return (
     <div className="space-y-4">
@@ -29,7 +38,15 @@ export default async function ReportProblemPage({ params }: { params: Promise<{ 
           the driver has to translate into an index the server then guesses back. */}
       <ReportProblemForm
         tripId={id}
-        shipments={shipments.map((s) => ({ id: s.id, shipmentNumber: s.shipmentNumber, totalCartons: s.totalCartons, cartons: s.cartons }))}
+        shipments={links.map((l) => ({
+          id: l.shipment.id,
+          shipmentNumber: l.shipment.shipmentNumber,
+          totalCartons: l.shipment.totalCartons,
+          cartons: l.shipment.cartons,
+          // Which problems can truthfully be reported about this shipment depends on whether it is
+          // actually on the truck — see PROBLEM_TYPES in the form.
+          loaded: l.loadedAt !== null,
+        }))}
       />
     </div>
   );

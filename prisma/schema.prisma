@@ -43,6 +43,24 @@ model Platform {
   name               String   @default("منصة الشحن")
   feePerCartonYER    Decimal  @default(5)
   whatsappSenderName String   @default("منصة الشحن")
+
+  /// Support contact for the ONE page in this product that is read by people with no account:
+  /// the public tracking lookup (/track). A customer who cannot find their shipment there has no
+  /// other route — they do not know which carrier holds it, so they cannot look up a branch, and
+  /// they have no login. Without these the page's help section had to either disappear or print
+  /// invented numbers, and a fabricated support line on a live page is worse than no line at all.
+  ///
+  /// All nullable, all rendered only when set: a platform that has not filled them in shows no
+  /// contact band rather than an empty one. Deliberately on Platform, not Company — this page is
+  /// reached before any carrier is known.
+  supportPhone       String?
+  supportWhatsapp    String?
+  supportEmail       String?
+  /// Free text, e.g. "من 8 ص - 10 م". Not two time columns: nobody computes with this, it is
+  /// printed verbatim beside the number, and real offices describe their hours in ways a pair of
+  /// timestamps cannot ("السبت–الخميس، ما عدا وقت الصلاة").
+  supportHours       String?
+
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -90,6 +108,21 @@ model Branch {
   name      String
   city      String
   country   String
+  /// The branch's own counter line, and where it physically is.
+  ///
+  /// Both were absent, and their absence was load-bearing in two places that had to work around
+  /// it: the public tracking page told a customer collecting from a branch to call the COMPANY's
+  /// number ("no address or phone column exists on it" — its own comment), and the driver's
+  /// "call the office" button had nothing branch-specific to dial either. In a multi-branch
+  /// carrier those are two different phones and two different cities, and the company switchboard
+  /// is rarely the one that can answer "is my shipment on the shelf".
+  ///
+  /// Nullable, with no backfill: a company that has only ever needed one number keeps working
+  /// exactly as before, and every consumer falls back to Company.phone when a branch has none.
+  /// Not a required field on the branch form for the same reason — an existing company must not be
+  /// blocked from editing a branch it created before these columns existed.
+  phone     String?
+  address   String?
   status    String   @default("ACTIVE") // ACTIVE | INACTIVE
   createdAt DateTime @default(now())
 

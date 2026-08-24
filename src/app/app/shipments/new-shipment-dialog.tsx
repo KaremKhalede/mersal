@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FormDialog } from "@/components/shell/form-dialog";
 import { Plus } from "lucide-react";
+import { CustomerFields } from "./customer-fields";
 import { createShipmentAction } from "./actions";
 
 export function NewShipmentDialog({ branches }: { branches: { id: string; name: string }[] }) {
@@ -17,7 +18,8 @@ export function NewShipmentDialog({ branches }: { branches: { id: string; name: 
     <FormDialog
       trigger={<Button><Plus className="h-4 w-4" /> شحنة جديدة</Button>}
       title="تسجيل شحنة جديدة"
-      description="أدخل بيانات العميل والكراتين — سيتم إنشاء الشحنة برقم فريد وسجل كرتون لكل قطعة."
+      description="بيانات العميل والكراتين والأجرة في خطوة واحدة — تُنشأ الشحنة برقم فريد وسجل كرتون لكل قطعة."
+      size="lg"
       action={createShipmentAction}
       onSuccess={(result) => {
         if (result && "shipmentId" in result && result.shipmentId) {
@@ -25,17 +27,8 @@ export function NewShipmentDialog({ branches }: { branches: { id: string; name: 
         }
       }}
     >
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="customerName">اسم العميل</Label>
-          <Input id="customerName" name="customerName" required />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="customerPhone">جوال العميل</Label>
-          <Input id="customerPhone" name="customerPhone" dir="ltr" required />
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
+      <CustomerFields />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="receiverName">اسم المستلم</Label>
           <Input id="receiverName" name="receiverName" placeholder="نفس العميل إن ترك فارغاً" />
@@ -45,10 +38,10 @@ export function NewShipmentDialog({ branches }: { branches: { id: string; name: 
           <Input id="receiverPhone" name="receiverPhone" dir="ltr" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label>فرع التحميل (المنشأ)</Label>
-          <Select name="loadBranchId" required>
+          <Label required>فرع التحميل (المنشأ)</Label>
+          <Select name="loadBranchId">
             <SelectTrigger><SelectValue placeholder="اختر الفرع" /></SelectTrigger>
             <SelectContent>
               {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
@@ -56,8 +49,8 @@ export function NewShipmentDialog({ branches }: { branches: { id: string; name: 
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label>فرع التفريغ (الوجهة)</Label>
-          <Select name="unloadBranchId" required>
+          <Label required>فرع التفريغ (الوجهة)</Label>
+          <Select name="unloadBranchId">
             <SelectTrigger><SelectValue placeholder="اختر الفرع" /></SelectTrigger>
             <SelectContent>
               {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
@@ -65,9 +58,9 @@ export function NewShipmentDialog({ branches }: { branches: { id: string; name: 
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
-          <Label htmlFor="cartonCount">عدد الكراتين</Label>
+          <Label htmlFor="cartonCount" required>عدد الكراتين</Label>
           <Input id="cartonCount" name="cartonCount" type="number" min={1} defaultValue={1} required />
         </div>
         <div className="space-y-1.5">
@@ -79,6 +72,33 @@ export function NewShipmentDialog({ branches }: { branches: { id: string; name: 
           <Input id="goodsType" name="goodsType" placeholder="بضاعة عامة" />
         </div>
       </div>
+      {/* The counter conversation is one sentence — "الأجرة 45,000، دفع 12,000 الآن" — but it used
+          to need two more dialogs on two more screens to record. Every field here was already
+          accepted by createShipmentAction; only the inputs were missing. All three stay optional:
+          a shipment with no agreed price yet is a real thing, and it still saves. */}
+      {/* items-end: the three labels are different lengths and the longest wraps on a narrow
+          dialog, which would otherwise leave its input sitting lower than the other two. */}
+      <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="shippingPrice">أجرة الشحن (ر.ي)</Label>
+          <Input id="shippingPrice" name="shippingPrice" type="number" min={0} step="0.01" dir="ltr" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="amountPaid">المدفوع الآن (ر.ي)</Label>
+          <Input id="amountPaid" name="amountPaid" type="number" min={0} step="0.01" dir="ltr" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>طريقة الدفع</Label>
+          <Select name="paymentMethod" defaultValue="CASH">
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="CASH">نقداً</SelectItem>
+              <SelectItem value="OTHER">أخرى</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       <div className="space-y-1.5">
         <Label htmlFor="notes">ملاحظات</Label>
         <Textarea id="notes" name="notes" rows={2} />

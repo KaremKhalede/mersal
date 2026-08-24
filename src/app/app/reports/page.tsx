@@ -10,6 +10,7 @@ import { ExportReportButton } from "./export-report-button";
 import { StatusDonut } from "./status-donut";
 import { ActivityChart } from "./activity-chart";
 import { TopEntitiesTable } from "./top-entities-table";
+import { PageHeader } from "@/components/shell/page-header";
 
 function toDateInputValue(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -44,21 +45,21 @@ export default async function ReportsPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold">التقارير</h2>
-          <p className="text-sm text-muted-foreground">تحليل أداء الشحنات والإيرادات خلال الفترة المحددة</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <ReportFilters branches={branches} from={fromStr} to={toStr} branchId={sp.branchId} destinationId={sp.destinationId} />
-          <ExportReportButton defaultFrom={defaultFrom} defaultTo={defaultTo} />
-        </div>
-      </div>
+      <PageHeader
+        title="التقارير"
+        description="تحليل أداء الشحنات والإيرادات خلال الفترة المحددة"
+        actions={
+          <>
+            <ReportFilters branches={branches} from={fromStr} to={toStr} branchId={sp.branchId} destinationId={sp.destinationId} />
+            <ExportReportButton defaultFrom={defaultFrom} defaultTo={defaultTo} />
+          </>
+        }
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard variant="icon-start" label="تم التسليم" value={report.delivered.toLocaleString()} icon={CheckCircle2} tone="primary" />
-        <StatCard variant="icon-start" label="إجمالي الكراتين" value={report.cartons.toLocaleString()} icon={Boxes} tone="success" />
-        <StatCard variant="icon-start" label="إجمالي الشحنات" value={report.total.toLocaleString()} icon={Package} tone="info" />
+        <StatCard label="تم التسليم" value={report.delivered} unit="شحنة" icon={CheckCircle2} tone="success" />
+        <StatCard label="إجمالي الكراتين" value={report.cartons} unit="كرتون" icon={Boxes} tone="primary" />
+        <StatCard label="إجمالي الشحنات" value={report.total} unit="شحنة" icon={Package} tone="primary" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

@@ -96,7 +96,7 @@ test.describe("Scenario A — normal shipment lifecycle", () => {
 
     // 8. Public tracking page reflects the final state without any auth
     const trackPage = await page.context().newPage();
-    await trackPage.goto(`/track/${shipment.trackingToken}`);
+    await trackPage.goto(`/t/${shipment.trackingToken}`);
     await expect(trackPage.locator("text=تم التسليم").first()).toBeVisible();
     await trackPage.close();
 

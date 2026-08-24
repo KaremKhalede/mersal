@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { prisma, createTestTenant, createTestShipment, createTestTrip, linkShipmentToTrip, login, cleanupTenant, pollUntil, expectNotFound } from "./helpers";
+import { test, expect } from "@playwright/test";
+import { prisma, createTestTenant, createTestShipment, createTestTrip, linkShipmentToTrip, login, cleanupTenant, pollUntil, expectNotFound, driverStopCard as stopCard } from "./helpers";
 import { confirmBulkUnload, reportPartialArrival } from "@/modules/trips/service";
 
 /**
@@ -48,10 +48,6 @@ const cartonsOf = (shipmentId: string) =>
 async function cartonByIndex(shipmentId: string, index: number) {
   const cartons = await cartonsOf(shipmentId);
   return cartons.find((c) => c.cartonIndex === index)!;
-}
-
-function stopCard(page: Page, stopId: string) {
-  return page.getByTestId(`stop-${stopId}`);
 }
 
 test.describe("Carton identity at unload — service", () => {
@@ -214,7 +210,7 @@ test.describe("Carton identity at unload — screens", () => {
     await login(page, tenant.driverEmail);
     await page.goto(`/driver/trip/${trip.id}`);
 
-    await stopCard(page, unloadStop.id).locator('button:has-text("تأكيد التفريغ")').click();
+    await (await stopCard(page, unloadStop.id)).locator('button:has-text("تأكيد التفريغ")').click();
     const summary = page.getByTestId("unload-summary");
     await expect(summary).toHaveText(/5\s*كرتون/);
     await expect(summary).toHaveText(/5\s*وصلت/);
@@ -246,7 +242,7 @@ test.describe("Carton identity at unload — screens", () => {
     await login(page, tenant.adminEmail);
     await page.goto(`/app/trips/${trip.id}`);
 
-    await stopCard(page, unloadStop.id).locator('button:has-text("تأكيد التفريغ")').click();
+    await (await stopCard(page, unloadStop.id)).locator('button:has-text("تأكيد التفريغ")').click();
     await expect(page.getByTestId("unload-summary")).toHaveText(/0\s*مفقود/);
     await page.click('[role="dialog"] button:has-text("تأكيد التفريغ")');
 

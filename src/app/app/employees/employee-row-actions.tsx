@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FormDialog } from "@/components/shell/form-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MoreVertical, Eye, Pencil, Ban, CheckCircle2 } from "lucide-react";
 import { updateEmployeeAction, toggleEmployeeStatusAction, resetEmployeePasswordAction } from "./actions";
@@ -59,19 +60,6 @@ export function EmployeeRowActions({
     });
   }
 
-  function handleEditSubmit(formData: FormData) {
-    startTransition(async () => {
-      const result = await updateEmployeeAction(employee.id, formData);
-      if (result?.error) {
-        toast.error(result.error);
-        return;
-      }
-      setEditOpen(false);
-      router.refresh();
-      toast.success("تم حفظ التعديلات");
-    });
-  }
-
   return (
     <>
       <DropdownMenu>
@@ -114,6 +102,7 @@ export function EmployeeRowActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {/* Stays a plain Dialog: a yes/no confirmation, not a form — there is no input to preserve. */}
       <Dialog open={confirmDisableOpen} onOpenChange={setConfirmDisableOpen}>
         <DialogContent>
           <DialogHeader>
@@ -137,60 +126,58 @@ export function EmployeeRowActions({
         </DialogContent>
       </Dialog>
 
+      {/* Controlled: opened from a menu item, so the dialog cannot own a nested trigger. */}
       {canEdit && (
-        <Dialog open={editOpen} onOpenChange={setEditOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>تعديل بيانات الموظف</DialogTitle></DialogHeader>
-            <form action={handleEditSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor={`name-${employee.id}`}>الاسم الكامل</Label>
-                <Input id={`name-${employee.id}`} name="name" defaultValue={employee.name} required />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor={`email-${employee.id}`}>البريد الإلكتروني</Label>
-                  <Input id={`email-${employee.id}`} name="email" type="email" dir="ltr" defaultValue={employee.email} required />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor={`phone-${employee.id}`}>رقم الجوال</Label>
-                  <Input id={`phone-${employee.id}`} name="phone" dir="ltr" defaultValue={employee.phone ?? ""} />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>الدور الوظيفي {isSelf && <span className="text-xs text-muted-foreground">(لا يمكنك تغيير دورك الخاص)</span>}</Label>
-                <Select name="roleId" defaultValue={employee.role?.id} disabled={isSelf}>
-                  <SelectTrigger className="w-full"><SelectValue placeholder="اختر الدور" /></SelectTrigger>
-                  <SelectContent>
-                    {roles.map((r) => (
-                      <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {isSelf && <input type="hidden" name="roleId" value={employee.role?.id ?? ""} />}
-              </div>
-              {showBranchField && (
-                <div className="space-y-1.5">
-                  <Label htmlFor={`branchId-${employee.id}`}>الفرع</Label>
-                  <select
-                    id={`branchId-${employee.id}`}
-                    name="branchId"
-                    defaultValue={employee.branchId ?? ""}
-                    className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  >
-                    <option value="">بدون فرع محدد</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>إلغاء</Button>
-                <Button type="submit" disabled={pending}>{pending ? "جارٍ الحفظ..." : "حفظ"}</Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <FormDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          title="تعديل بيانات الموظف"
+          successMessage="تم حفظ التعديلات"
+          action={(formData) => updateEmployeeAction(employee.id, formData)}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor={`name-${employee.id}`}>الاسم الكامل</Label>
+            <Input id={`name-${employee.id}`} name="name" defaultValue={employee.name} required />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor={`email-${employee.id}`}>البريد الإلكتروني</Label>
+              <Input id={`email-${employee.id}`} name="email" type="email" dir="ltr" defaultValue={employee.email} required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`phone-${employee.id}`}>رقم الجوال</Label>
+              <Input id={`phone-${employee.id}`} name="phone" dir="ltr" defaultValue={employee.phone ?? ""} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>الدور الوظيفي {isSelf && <span className="text-xs text-muted-foreground">(لا يمكنك تغيير دورك الخاص)</span>}</Label>
+            <Select name="roleId" defaultValue={employee.role?.id} disabled={isSelf}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="اختر الدور" /></SelectTrigger>
+              <SelectContent>
+                {roles.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {isSelf && <input type="hidden" name="roleId" value={employee.role?.id ?? ""} />}
+          </div>
+          {showBranchField && (
+            <div className="space-y-1.5">
+              <Label htmlFor={`branchId-${employee.id}`}>الفرع</Label>
+              <select
+                id={`branchId-${employee.id}`}
+                name="branchId"
+                defaultValue={employee.branchId ?? ""}
+                className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <option value="">بدون فرع محدد</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </FormDialog>
       )}
     </>
   );

@@ -57,6 +57,55 @@ export function formatBusinessStamp(date: Date): string {
   });
 }
 
+/**
+ * ---------------------------------------------------------------------------------------------
+ * THE TWO DATE FORMATS THIS PRODUCT HAS
+ * ---------------------------------------------------------------------------------------------
+ *
+ * Every date a user reads goes through `formatDate` or `formatDateStamp`. Nothing else.
+ *
+ * ## Why not a numeric date
+ *
+ * `Intl` renders Arabic numeric dates with U+200F (RIGHT-TO-LEFT MARK) around each separator:
+ *
+ *     day/month/year  ->  "21‏/8‏/2026"
+ *
+ * Those marks are strong-RTL characters. They break what would otherwise be one left-to-right
+ * number run into three separate runs, and the surrounding RTL paragraph then lays those runs out
+ * right-to-left — so the string *displays* as 2026/8/21. Day and year swap places on screen.
+ *
+ * This was live in thirteen places: the shipments and trips lists, the activity log, customer,
+ * employee and vehicle detail, the trip page, the public tracking page, and the trip manifest a
+ * driver signs. Not one of them carried an LTR island, and an LTR island would not have saved them
+ * anyway — the marks are *inside* the string, so forcing the container to LTR renders "212026/8/"
+ * instead. (Measured, not assumed: see the same fix on the invoice document.)
+ *
+ * A spelled month has no separators to reorder and no marks at all — `Intl` emits
+ * "21 أغسطس 2026" clean. It is also simply better on a document: no reader has to work out
+ * whether 8/9 means August or September.
+ *
+ * ## Why two, and only two
+ *
+ * The call sites had drifted to twelve different option objects — five of them numeric, i.e. five
+ * different ways to be wrong. A date is either a day, or a moment. That is two functions.
+ */
+
+/** "21 أغسطس 2026". The date of something. */
+export function formatDate(date: Date): string {
+  return formatBusinessDateTime(date, { year: "numeric", month: "long", day: "numeric" });
+}
+
+/**
+ * "21 أغسطس 2026 · 10:40 ص". The moment something happened — timelines, logs, audit trails.
+ *
+ * Composed from the two clean formatters rather than asking Intl for both at once, which returns
+ * "21 أغسطس 2026 في 10:40 ص" — a preposition that reads fine in a sentence and poorly in a table
+ * cell. The separator is the same "·" the rest of the product uses to join facts on one line.
+ */
+export function formatDateStamp(date: Date): string {
+  return `${formatDate(date)} · ${formatBusinessTime(date)}`;
+}
+
 /** Calendar date as YYYY-MM-DD in business time. Uses en-CA because "ar-SA" resolves to Arabic-Indic
  * digits — wrong for a stored Gregorian registration date. */
 export function formatBusinessDate(date: Date): string {

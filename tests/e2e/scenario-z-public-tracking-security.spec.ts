@@ -52,7 +52,7 @@ test.describe("Scenario Z — public tracking security (P0-1)", () => {
   test("the old enumerable URL no longer resolves — a shipment number is not a credential", async ({ page }) => {
     const { tenant, row } = await arrivedShipment();
 
-    await page.goto(`/track/${row.shipmentNumber}`);
+    await page.goto(`/t/${row.shipmentNumber}`);
     // The customer-facing not-found screen, and no trace of the shipment behind it.
     await expect(page.locator("text=لم نجد هذه الشحنة").first()).toBeVisible();
     const body = await page.locator("body").innerText();
@@ -62,14 +62,14 @@ test.describe("Scenario Z — public tracking security (P0-1)", () => {
   });
 
   test("a random token resolves to nothing", async ({ page }) => {
-    await page.goto(`/track/${newTrackingToken()}`);
+    await page.goto(`/t/${newTrackingToken()}`);
     await expect(page.locator("text=لم نجد هذه الشحنة").first()).toBeVisible();
   });
 
   test("the real token opens the page — reading stays frictionless", async ({ page }) => {
     const { tenant, row } = await arrivedShipment();
 
-    await page.goto(`/track/${row.trackingToken}`);
+    await page.goto(`/t/${row.trackingToken}`);
     await expect(page.locator(`text=${row.shipmentNumber}`).first()).toBeVisible();
     // Nothing is demanded just to look.
     await expect(page.locator('input[name="last4"]')).toHaveCount(0);
@@ -80,7 +80,7 @@ test.describe("Scenario Z — public tracking security (P0-1)", () => {
   test("choosing branch pickup requires the receiver's last 4 digits", async ({ page }) => {
     const { tenant, shipment, row } = await arrivedShipment();
 
-    await page.goto(`/track/${row.trackingToken}`);
+    await page.goto(`/t/${row.trackingToken}`);
     await page.click('button:has-text("استلام من الفرع")');
 
     await page.fill('input[name="last4"]', WRONG_LAST4);
@@ -104,7 +104,7 @@ test.describe("Scenario Z — public tracking security (P0-1)", () => {
   test("a home-delivery request with the wrong digits creates no DeliveryRequest at all", async ({ page }) => {
     const { tenant, shipment, row } = await arrivedShipment();
 
-    await page.goto(`/track/${row.trackingToken}`);
+    await page.goto(`/t/${row.trackingToken}`);
     await page.click('button:has-text("توصيل للمنزل")');
     await page.fill('textarea[name="destinationAddress"]', "عنوان المهاجم");
     await page.fill('input[name="last4"]', WRONG_LAST4);
@@ -121,7 +121,7 @@ test.describe("Scenario Z — public tracking security (P0-1)", () => {
   test("even a verified public request cannot dispatch goods — it lands PENDING for branch review", async ({ page }) => {
     const { tenant, shipment, row } = await arrivedShipment();
 
-    await page.goto(`/track/${row.trackingToken}`);
+    await page.goto(`/t/${row.trackingToken}`);
     await page.click('button:has-text("توصيل للمنزل")');
     await page.fill('textarea[name="destinationAddress"]', "المكلا - حي الديس");
     await page.fill('input[name="last4"]', CORRECT_LAST4);
@@ -141,7 +141,7 @@ test.describe("Scenario Z — public tracking security (P0-1)", () => {
   test("the branch confirms a customer request before anything is dispatched", async ({ page }) => {
     const { tenant, shipment, row } = await arrivedShipment();
 
-    await page.goto(`/track/${row.trackingToken}`);
+    await page.goto(`/t/${row.trackingToken}`);
     await page.click('button:has-text("توصيل للمنزل")');
     await page.fill('textarea[name="destinationAddress"]', "المكلا - حي الديس");
     await page.fill('input[name="last4"]', CORRECT_LAST4);
@@ -168,7 +168,7 @@ test.describe("Scenario Z — public tracking security (P0-1)", () => {
     const a = await arrivedShipment();
     const b = await arrivedShipment();
 
-    await page.goto(`/track/${a.row.trackingToken}`);
+    await page.goto(`/t/${a.row.trackingToken}`);
     await page.click('button:has-text("استلام من الفرع")');
     await page.fill('input[name="last4"]', CORRECT_LAST4);
     await page.click('button:has-text("تأكيد")');
@@ -197,7 +197,7 @@ test.describe("Scenario Z — public tracking security (P0-1)", () => {
     });
     const row = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
 
-    await page.goto(`/track/${row.trackingToken}`);
+    await page.goto(`/t/${row.trackingToken}`);
     await expect(page.locator('button:has-text("استلام من الفرع")')).toHaveCount(0);
 
     const after = await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
@@ -209,7 +209,7 @@ test.describe("Scenario Z — public tracking security (P0-1)", () => {
   test("a rejected attempt keeps what the customer typed — retrying costs one field, not the whole form", async ({ page }) => {
     const { tenant, row } = await arrivedShipment();
 
-    await page.goto(`/track/${row.trackingToken}`);
+    await page.goto(`/t/${row.trackingToken}`);
     await page.click('button:has-text("توصيل للمنزل")');
     await page.fill('textarea[name="destinationAddress"]', "المكلا - حي الديس - شارع 14");
     await page.fill('textarea[name="notes"]', "الاتصال قبل الوصول");
@@ -227,7 +227,7 @@ test.describe("Scenario Z — public tracking security (P0-1)", () => {
   test("the public page exposes no internal identifiers or staff data", async ({ page }) => {
     const { tenant, shipment, row } = await arrivedShipment();
 
-    await page.goto(`/track/${row.trackingToken}`);
+    await page.goto(`/t/${row.trackingToken}`);
     const body = await page.locator("body").innerText();
     expect(body).not.toContain(shipment.id);
     expect(body).not.toContain(tenant.company.id);

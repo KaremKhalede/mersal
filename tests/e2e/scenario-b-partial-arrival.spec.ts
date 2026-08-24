@@ -27,8 +27,8 @@ test.describe("Scenario B — partial arrival", () => {
     await linkShipmentToTrip(trip.id, shipment.id, stop1.id, stop2.id);
 
     await login(page, tenant.driverEmail);
-    await page.click('a:has-text("عرض تفاصيل الرحلة")');
-    await page.waitForURL(/\/driver\/trip\//);
+    // /driver *is* the trip now — the summary page that used to sit between login and the stops is
+    // gone, and its content moved into this screen's own header.
 
     const stop1Card = page.getByTestId(`stop-${stop1.id}`);
     await stop1Card.locator('button:has-text("تأكيد التحميل")').click();
@@ -67,7 +67,7 @@ test.describe("Scenario B — partial arrival", () => {
 
     // Customer tracking communicates the partial count in plain language
     const trackPage = await page.context().newPage();
-    await trackPage.goto(`/track/${shipment.trackingToken}`);
+    await trackPage.goto(`/t/${shipment.trackingToken}`);
     await expect(trackPage.locator("text=وصل 3 من أصل 5")).toBeVisible();
     await trackPage.close();
 

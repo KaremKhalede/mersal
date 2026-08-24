@@ -58,7 +58,7 @@ export async function companyDashboard(companyId: string, branchScope?: string |
     return {
       ...t,
       currentStop,
-      timing: currentStop ? stopTiming(currentStop.plannedArrival, currentStop.actualArrival) : null,
+      timing: currentStop ? stopTiming(currentStop) : null,
       shipmentCount: t.shipmentLinks.length,
       cartonCount: t.shipmentLinks.reduce((sum, l) => sum + l.cartonsLoaded, 0),
     };

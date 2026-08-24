@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FormDialog } from "@/components/shell/form-dialog";
 import { updatePlatformUserAction, setPlatformUserStatusAction, resetPlatformUserPasswordAction } from "./actions";
 import { ResetPasswordDialog } from "@/components/shell/reset-password-dialog";
 
@@ -58,19 +59,6 @@ export function PlatformUserRowActions({
   const [editOpen, setEditOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const active = user.status === "ACTIVE";
-
-  function submitEdit(formData: FormData) {
-    startTransition(async () => {
-      const result = await updatePlatformUserAction(user.id, formData);
-      if (result?.error) {
-        toast.error(result.error);
-        return;
-      }
-      setEditOpen(false);
-      toast.success("تم حفظ التعديلات");
-      router.refresh();
-    });
-  }
 
   function toggleStatus() {
     startTransition(async () => {
@@ -119,53 +107,45 @@ export function PlatformUserRowActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
-          <form action={submitEdit} className="space-y-4">
-            <DialogHeader>
-              <DialogTitle>تعديل المستخدم</DialogTitle>
-              <DialogDescription>تغيير الحالة يتم من قائمة الإجراءات بتأكيد منفصل.</DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-1.5">
-              <Label htmlFor={`name-${user.id}`}>الاسم</Label>
-              <Input id={`name-${user.id}`} name="name" defaultValue={user.name} required />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor={`email-${user.id}`}>البريد الإلكتروني</Label>
-                <Input id={`email-${user.id}`} name="email" type="email" defaultValue={user.email} dir="ltr" required />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={`phone-${user.id}`}>رقم الجوال</Label>
-                <Input id={`phone-${user.id}`} name="phone" defaultValue={user.phone ?? ""} dir="ltr" />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`role-${user.id}`}>الدور</Label>
-              <select
-                id={`role-${user.id}`}
-                name="platformRoleId"
-                defaultValue={user.platformRoleId ?? roles[0]?.id}
-                className={selectClass}
-                required
-              >
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
-              <p className="text-[11px] text-muted-foreground">الدور يحدد الصفحات التي يصل إليها المستخدم.</p>
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={pending}>
-                إلغاء
-              </Button>
-              <Button type="submit" disabled={pending}>{pending ? "جارٍ الحفظ..." : "حفظ"}</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* Controlled: opened from a menu item, so the dialog cannot own a nested trigger. */}
+      <FormDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        title="تعديل المستخدم"
+        description="تغيير الحالة يتم من قائمة الإجراءات بتأكيد منفصل."
+        successMessage="تم حفظ التعديلات"
+        action={(formData) => updatePlatformUserAction(user.id, formData)}
+      >
+        <div className="space-y-1.5">
+          <Label htmlFor={`name-${user.id}`}>الاسم</Label>
+          <Input id={`name-${user.id}`} name="name" defaultValue={user.name} required />
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={`email-${user.id}`}>البريد الإلكتروني</Label>
+            <Input id={`email-${user.id}`} name="email" type="email" defaultValue={user.email} dir="ltr" required />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`phone-${user.id}`}>رقم الجوال</Label>
+            <Input id={`phone-${user.id}`} name="phone" defaultValue={user.phone ?? ""} dir="ltr" />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`role-${user.id}`}>الدور</Label>
+          <select
+            id={`role-${user.id}`}
+            name="platformRoleId"
+            defaultValue={user.platformRoleId ?? roles[0]?.id}
+            className={selectClass}
+            required
+          >
+            {roles.map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+          <p className="text-2xs text-muted-foreground">الدور يحدد الصفحات التي يصل إليها المستخدم.</p>
+        </div>
+      </FormDialog>
 
       <Dialog open={statusOpen} onOpenChange={setStatusOpen}>
         <DialogContent>

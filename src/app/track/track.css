@@ -1,0 +1,623 @@
+/*
+ * The public tracking surface — the only page in this product with no session behind it, and the
+ * only one a customer ever sees before they know which carrier holds their goods.
+ *
+ * Scoped entirely under `.track-page`. The app's own tokens (--primary, --card, --muted) drive the
+ * signed-in product, which is a dense operations tool; this page is a doorway, and it carries its
+ * own deeper navy so the two never have to compromise on one blue. Nothing here leaks: every
+ * custom property is declared on `.track-page` itself, not on :root.
+ */
+
+.track-page {
+  /* Navy, not the app's indigo. A shipping counter's ink — deep enough that white type on it is
+     unambiguous at a glance in daylight, which is where this page gets read. */
+  --navy-900: #0d2450;
+  --navy-800: #13356b;
+  --navy-700: #1a4487;
+  --navy-100: #e8eefb;
+  --navy-50: #f2f6fd;
+
+  --ink: #14213d;
+  --ink-soft: #5a6a86;
+  --surface: #ffffff;
+  --page: #f5f8fd;
+  --hairline: #e3eaf6;
+
+  position: relative;
+  min-height: 100%;
+  background: var(--page);
+  color: var(--ink);
+  isolation: isolate;
+}
+
+/*
+ * The backdrop: a dot grid that fades out downward, plus one wide, very soft navy bloom behind the
+ * hero. Both are painted here rather than shipped as images — two gradients cost nothing on a
+ * metered connection, and this page is opened on one more often than not.
+ *
+ * `-z-10` on a pseudo-element inside an `isolate` container keeps it behind the content without
+ * touching any child's stacking.
+ */
+.track-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -10;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(19, 53, 107, 0.09) 1px, transparent 0),
+    radial-gradient(120% 70% at 50% -10%, rgba(19, 53, 107, 0.1), transparent 60%);
+  background-size: 22px 22px, 100% 100%;
+  /* The grid belongs to the hero, not the whole scroll — it thins out as the page turns to content. */
+  mask-image: linear-gradient(to bottom, #000 0%, #000 32%, transparent 62%);
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Motion
+ *
+ * One orchestrated entrance, then nothing until the reader scrolls. The page-load sequence runs
+ * top-down in the order the eye reads it — brand, headline, then the field the visitor came to
+ * type in — so the form is the last thing to settle and therefore the thing they are looking at.
+ * ------------------------------------------------------------------------------------------- */
+
+@keyframes track-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.track-rise {
+  animation: track-rise 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.track-delay-1 { animation-delay: 60ms; }
+.track-delay-2 { animation-delay: 140ms; }
+.track-delay-3 { animation-delay: 230ms; }
+
+/*
+ * Scroll reveal with no JavaScript: `animation-timeline: view()` drives the same keyframes off the
+ * element's own position in the viewport. Guarded by @supports so a browser without it simply gets
+ * the content, already visible — the fallback is "no animation", never "no content".
+ */
+@supports (animation-timeline: view()) {
+  .track-reveal {
+    animation: track-rise linear both;
+    animation-timeline: view();
+    animation-range: entry 5% cover 22%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track-rise,
+  .track-reveal {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Components
+ * ------------------------------------------------------------------------------------------- */
+
+.track-card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  /* Two shadows: a tight one that seats the card on the page, and a wide low-opacity navy one that
+     tints the shade rather than greying it. A single neutral shadow reads as a floating rectangle. */
+  box-shadow:
+    0 1px 2px rgba(19, 53, 107, 0.05),
+    0 18px 40px -24px rgba(13, 36, 80, 0.35);
+}
+
+.track-field {
+  width: 100%;
+  height: 3rem;
+  /*
+   * PHYSICAL padding, not logical, and that is the whole point.
+   *
+   * The input carries dir="ltr" (its value is "SH-100482" or "4567" — an LTR island in an RTL
+   * page), so `padding-inline-start` resolves against the INPUT's direction, not the page's. The
+   * first pass used `padding-inline: 0.9rem 2.75rem` and reserved the gap on the left while the
+   * glyph sat on the left too, so the icon printed straight through the placeholder: "⬡H-100482".
+   * Left/right say what they mean here regardless of which direction wins.
+   */
+  padding-left: 0.9rem;
+  padding-right: 2.75rem;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--navy-50);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.track-field::placeholder {
+  color: #9aa8c2;
+}
+
+.track-field:hover {
+  border-color: #cfdcf3;
+}
+
+.track-field:focus-visible {
+  background: var(--surface);
+  border-color: var(--navy-700);
+  box-shadow: 0 0 0 4px rgba(26, 68, 135, 0.13);
+}
+
+.track-submit {
+  width: 100%;
+  height: 3rem;
+  border-radius: 12px;
+  border: 0;
+  background: linear-gradient(180deg, var(--navy-800), var(--navy-900));
+  color: #fff;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 200ms ease, filter 160ms ease;
+  box-shadow: 0 8px 18px -10px rgba(13, 36, 80, 0.75);
+}
+
+.track-submit:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 12px 24px -10px rgba(13, 36, 80, 0.85);
+}
+
+.track-submit:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.track-submit:focus-visible {
+  outline: 3px solid rgba(26, 68, 135, 0.35);
+  outline-offset: 2px;
+}
+
+.track-submit:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+/* The four assurances. The tile is the only coloured thing in the row, so the hover deepens it
+   rather than moving the whole card around — a strip of four cards that all lift on hover reads as
+   a menu, and none of these are clickable. */
+.track-assurance {
+  transition: transform 200ms ease;
+}
+
+.track-assurance:hover .track-assurance__icon {
+  background: var(--navy-800);
+  color: #fff;
+  transform: translateY(-2px);
+}
+
+.track-assurance__icon {
+  transition: background-color 200ms ease, color 200ms ease, transform 200ms ease;
+}
+
+/* Contact rows: the affordance is the row, because each one is a real link. */
+.track-contact {
+  transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
+}
+
+.track-contact:hover {
+  border-color: #cfdcf3;
+  background: var(--navy-50);
+  transform: translateY(-1px);
+}
+
+/*
+ * "Where do I find the shipment number?" — a native <details>, styled.
+ *
+ * The same reasoning as the receivables list: disclosure is the platform's own control, it is
+ * keyboard- and screen-reader-correct with no ARIA written by hand, and it works before hydration.
+ * On this page that last point is not academic — it is the first paint on a weak connection, for
+ * someone who is already lost.
+ */
+.track-help > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.track-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.track-help__chevron {
+  transition: transform 200ms ease;
+}
+
+.track-help[open] .track-help__chevron {
+  transform: rotate(180deg);
+}
+
+.track-help__body {
+  animation: track-rise 260ms ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track-help__body {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * THE RESULT CARD
+ *
+ * One tone drives the whole card — headline, parcel badge, and the accent behind the number —
+ * because a customer reads the colour before the words. `data`-free: the tone is a modifier class
+ * set once on the article, so nothing downstream has to re-derive "is this delivered".
+ * ------------------------------------------------------------------------------------------- */
+
+.track-result {
+  --tone: var(--navy-800);
+  --tone-soft: var(--navy-100);
+}
+
+.track-result--done {
+  --tone: #157a4a;
+  --tone-soft: #e4f5ec;
+}
+
+.track-result--warn {
+  --tone: #a8571a;
+  --tone-soft: #fbeee1;
+}
+
+.track-result--moving {
+  --tone: var(--navy-800);
+  --tone-soft: var(--navy-100);
+}
+
+.track-result__status {
+  color: var(--tone);
+}
+
+/* The route strip: two endpoints and the distance between them, drawn rather than described.
+   The dashed rule is a border, not a background image, so it survives a print — this card is the
+   thing a customer screenshots and shows at a counter. */
+.track-route {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 3rem;
+  height: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.track-route__line {
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  border-top: 2px dashed #cfdcf3;
+}
+
+/* The traversed portion, sized from the recorded stage. Solid where the dashed remainder is not:
+   what has happened is a fact, what is left is an expectation. */
+.track-route__line--done {
+  inset-inline-end: auto;
+  border-top-style: solid;
+  border-top-color: var(--tone);
+  transition: inline-size 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.track-route__vehicle {
+  position: absolute;
+  top: 50%;
+  margin-top: -0.875rem;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--tone);
+  box-shadow: 0 0 0 4px var(--surface);
+  /* Travels the track's inner width — at 0 its near edge sits on the origin, at 100 its far edge
+     sits on the destination. Centring it on the percentage instead put half the marker outside the
+     rail and over the endpoint label. */
+  inset-inline-start: calc((100% - 1.75rem) * var(--p, 0) / 100);
+  transition: inset-inline-start 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track-route__line--done,
+  .track-route__vehicle {
+    transition: none;
+  }
+}
+
+/* Endpoint dots sit on the strip's own line rather than inside the labels, so the two cities stay
+   readable at any length and the rule always meets a dot. */
+.track-route::before,
+.track-route::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-top: -0.25rem;
+  border-radius: 999px;
+  background: var(--tone);
+}
+
+.track-route::before {
+  inset-inline-start: -0.25rem;
+}
+
+/* Hollow until the shipment actually gets there. A filled destination dot on a shipment still on
+   the road is the same false claim the parked vehicle was making. */
+.track-route::after {
+  inset-inline-end: -0.25rem;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 2px #cfdcf3;
+}
+
+.track-route[data-arrived]::after {
+  background: var(--tone);
+  box-shadow: none;
+}
+
+/* ---- parcel mark ------------------------------------------------------------------------ */
+
+.track-parcel {
+  position: relative;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* Smaller on a phone so it can sit beside the number rather than under it — the mark is a signal,
+   not the subject, and the subject is the status line next to it. */
+.track-parcel svg {
+  width: 5.5rem;
+  height: 5.5rem;
+}
+
+@media (min-width: 640px) {
+  .track-parcel svg {
+    width: 8rem;
+    height: 8rem;
+  }
+}
+
+.track-parcel__halo { fill: var(--tone-soft); }
+.track-parcel__body { fill: #e6c9a0; stroke: #c9a577; stroke-width: 2; stroke-linejoin: round; }
+.track-parcel__seam { stroke: #c9a577; stroke-width: 2; fill: none; stroke-linecap: round; }
+.track-parcel__tape { fill: #d8b183; }
+
+/* The ring is a wider circle in the same drawing, so it can never fall out of step with the badge
+   it surrounds — which is exactly what a CSS box-shadow ring did across the halo's edge. */
+.track-parcel__ring { fill: var(--surface); }
+.track-parcel__badge { fill: var(--tone); }
+
+.track-parcel__glyph {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---- share ------------------------------------------------------------------------------- */
+
+.track-share {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 2.25rem;
+  padding-inline: 0.9rem;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--navy-800);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.track-share:hover {
+  border-color: #cfdcf3;
+  background: var(--navy-50);
+}
+
+.track-share:active { transform: translateY(1px); }
+
+.track-share:focus-visible {
+  outline: 3px solid rgba(26, 68, 135, 0.35);
+  outline-offset: 2px;
+}
+
+/* ---- notices ----------------------------------------------------------------------------- */
+
+.track-notice {
+  border-radius: 14px;
+  border: 1px solid;
+  padding: 0.85rem 1rem;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.track-notice--success { border-color: #bfe3d0; background: #eef8f2; color: #14683f; }
+.track-notice--warn { border-color: #f0d7b6; background: #fdf5ea; color: #8a4a12; }
+.track-notice--danger { border-color: #f3c9c9; background: #fdf2f2; color: #a12b2b; }
+
+/* ---- timeline ---------------------------------------------------------------------------- */
+
+.track-timeline {
+  display: grid;
+  gap: 0;
+}
+
+.track-timeline__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.75rem 1fr auto;
+  grid-template-areas:
+    "node title time"
+    "node desc  desc";
+  align-items: center;
+  column-gap: 0.75rem;
+  padding-block: 0.85rem;
+}
+
+/* The spine is drawn by each row rather than by one absolutely-positioned rule, so it stretches to
+   whatever height a row's description needs and never runs past the last node. */
+.track-timeline__item::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(0.875rem - 1px);
+  top: 50%;
+  bottom: -0.85rem;
+  width: 2px;
+  background: var(--hairline);
+}
+
+.track-timeline__item:last-child::before { display: none; }
+
+.track-timeline__node {
+  grid-area: node;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  background: var(--navy-100);
+  color: var(--navy-800);
+  z-index: 1;
+}
+
+/*
+ * Three states, and the distinction that matters is LATEST vs earlier — not done vs pending.
+ *
+ * Every event in the list already happened, so "done" is a completed tone, never a waiting one. Only
+ * the curated fallback (a shipment with no events yet) has steps that have not occurred, and only
+ * those get the pale treatment.
+ */
+.track-timeline__item[data-state="latest"] .track-timeline__node,
+.track-timeline__item[data-state="current"] .track-timeline__node {
+  background: #157a4a;
+  color: #fff;
+}
+
+.track-timeline__item[data-state="done"] .track-timeline__node {
+  background: #dcf0e6;
+  color: #157a4a;
+}
+
+/* The spine above a completed row is completed too, so the eye reads one finished thread rather
+   than a chain of disconnected dots. */
+.track-timeline__item[data-state="latest"]::before,
+.track-timeline__item[data-state="done"]::before {
+  background: #b9e0cb;
+}
+
+.track-timeline__item[data-state="todo"] .track-timeline__node {
+  background: #eef2f9;
+  color: #9aa8c2;
+}
+
+.track-timeline__title {
+  grid-area: title;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--navy-900);
+}
+
+.track-timeline__item[data-state="todo"] .track-timeline__title {
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.track-timeline__desc {
+  grid-area: desc;
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.track-timeline__time {
+  grid-area: time;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  color: var(--ink-soft);
+}
+
+/* The summary swaps its own label, so the control always names what the next tap does. */
+.track-help__less { display: none; }
+.track-help[open] .track-help__more { display: none; }
+.track-help[open] .track-help__less { display: inline; }
+
+/* ---- support buttons --------------------------------------------------------------------- */
+
+.track-support-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  height: 2.5rem;
+  padding-inline: 1rem;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--navy-800);
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.track-support-btn:hover {
+  border-color: #cfdcf3;
+  background: var(--navy-50);
+  transform: translateY(-1px);
+}
+
+.track-support-btn--solid {
+  border-color: transparent;
+  background: linear-gradient(180deg, var(--navy-800), var(--navy-900));
+  color: #fff;
+}
+
+.track-support-btn--solid:hover {
+  background: linear-gradient(180deg, var(--navy-700), var(--navy-800));
+  border-color: transparent;
+}
+
+.track-support-btn:focus-visible {
+  outline: 3px solid rgba(26, 68, 135, 0.35);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track-share,
+  .track-support-btn {
+    transition: none;
+  }
+}
+
+/* WhatsApp's own green. The only place in this product that borrows another brand's colour, and it
+   earns it: a green WhatsApp button is a control people recognise before they read it. */
+.track-support-btn--whatsapp {
+  border-color: transparent;
+  background: #25d366;
+  color: #073b21;
+  font-weight: 700;
+}
+
+.track-support-btn--whatsapp:hover {
+  border-color: transparent;
+  background: #1fbe5b;
+  color: #062f1a;
+}

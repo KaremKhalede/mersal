@@ -7,9 +7,13 @@ import { getBranchScope } from "@/lib/branch-scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { formatBusinessStamp } from "@/lib/timezone";
+import { formatDateStamp } from "@/lib/timezone";
 import { EXCEPTION_TYPE_LABELS, type ExceptionType } from "@/lib/enums";
 import { ResolveExceptionButton } from "@/app/app/shipments/[id]/resolve-exception-button";
+import { PageHeader } from "@/components/shell/page-header";
+import { EmptyState } from "@/components/feedback/empty-state";
+import { ShieldCheck } from "lucide-react";
+import { routeLabel } from "@/lib/utils";
 
 export default async function ExceptionsPage() {
   const user = await requireCompanyUser();
@@ -18,8 +22,21 @@ export default async function ExceptionsPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">الاستثناءات المفتوحة ({shipments.length})</h2>
-      {shipments.length === 0 && <p className="text-sm text-muted-foreground">لا توجد استثناءات مفتوحة حالياً</p>}
+      <PageHeader title="الاستثناءات المفتوحة" count={shipments.length} description="شحنات موقوفة بانتظار قرار" />
+      {/* A primary list page, so it gets the product's empty state rather than a grey line — and
+          the wording reads as the good news it is. No action button: an exception is raised from a
+          shipment or by a driver, never created here. */}
+      {shipments.length === 0 && (
+        <Card>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={ShieldCheck}
+              title="لا توجد استثناءات مفتوحة"
+              description="تظهر هنا الشحنات الموقوفة بانتظار قرار — يبلّغ عنها موظف من صفحة الشحنة أو سائق من تطبيقه."
+            />
+          </CardContent>
+        </Card>
+      )}
       <div className="space-y-3">
         {shipments.map((s) => (
           <Card key={s.id}>
@@ -31,9 +48,9 @@ export default async function ExceptionsPage() {
               <Badge variant="destructive">{EXCEPTION_TYPE_LABELS[s.exceptionType as ExceptionType] ?? "استثناء"}</Badge>
             </CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">{s.loadBranch.name} ← {s.unloadBranch.name}</p>
+              <p className="text-sm text-muted-foreground">{routeLabel(s.loadBranch.name, s.unloadBranch.name)}</p>
               {s.exceptionNote && <p className="text-sm">{s.exceptionNote}</p>}
-              <p className="text-xs text-muted-foreground">{formatBusinessStamp(s.updatedAt)}</p>
+              <p className="text-xs text-muted-foreground">{formatDateStamp(s.updatedAt)}</p>
               {/* Same rule the shipment page and the server use — one function, three call sites,
                   so a recovery offered here is a recovery resolveException will accept. */}
               <ResolveExceptionButton

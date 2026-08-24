@@ -37,7 +37,7 @@ export function LateCartonDialog({
   return (
     <FormDialog
       trigger={
-        <Button size="sm" variant="outline">
+        <Button size="sm">
           <PackageSearch className="h-4 w-4" /> وصل كرتون متأخر
         </Button>
       }

@@ -1,281 +1,142 @@
+import Link from "next/link";
 import { requireCompanyUser } from "@/lib/auth";
 import { requireCan } from "@/lib/rbac";
-import { listInvoiceCartonEntries, getCurrentPlatformFee, billingSummary } from "@/modules/billing/service";
-import { StatCard } from "@/components/ui/stat-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Wallet, CheckCircle2, Landmark, Boxes, Eye, ChevronDown, ChevronLeft, Clock, AlertCircle } from "lucide-react";
-import Link from "next/link";
-import { formatBusinessDateTime } from "@/lib/timezone";
+import { getBranchScope } from "@/lib/branch-scope";
+import { listBranches } from "@/modules/branches/service";
+import { businessToday, type AgingKey } from "@/modules/collections/service";
+import { PageHeader } from "@/components/shell/page-header";
+import { cn } from "@/lib/utils";
 import { ExportInvoicesButton } from "./export-invoices-button";
-import { DownloadPdfButton } from "./download-pdf-button";
-import { InvoiceActionsMenu } from "./invoice-actions-menu";
-import { ShipmentBreakdownTable } from "./shipment-breakdown-table";
-import { ReportPaymentDialog } from "./report-payment-dialog";
-import {
-  SUBMISSION_STATUS_LABELS,
-  PAYMENT_METHOD_LABELS,
-  INVOICE_STATE_LABELS,
-  INVOICE_STATE_STYLES,
-  listCompanySubmissions,
-  listCompanyInvoiceStates,
-  type SubmissionStatus,
-} from "@/modules/billing/service";
+import { ReceivablesPanel } from "./receivables-panel";
+import { PlatformFeesPanel } from "./platform-fees-panel";
+import { DailyClosePanel } from "./daily-close-panel";
 
-const INVOICE_PAGE_SIZE = 3;
+/**
+ * ============================================================================================
+ * المالية — one destination, three questions.
+ * ============================================================================================
+ *
+ * This page used to be one thing: the platform's invoices. That is the money the company OWES,
+ * settled once a month. The money the company is OWED — collected dozens of times a day, at a
+ * counter, in cash — had no screen at all: it was a single figure on the dashboard linking to a
+ * checkbox filter on the shipments list. The two were not mixed; one was simply missing.
+ *
+ * So the page now answers three questions, in the order a manager asks them:
+ *
+ *   المستحقات على العملاء  (default)  من عليه، ومنذ متى؟          -> receivables-panel.tsx
+ *   إقفال اليوم                       من قبض اليوم، وهل يطابق؟     -> daily-close-panel.tsx
+ *   رسوم المنصة                       كم علينا للمنصة؟            -> platform-fees-panel.tsx
+ *
+ * Receivables leads because it is the question asked most often and the one with no other home.
+ * Platform fees keep every byte of their previous behaviour, moved not rewritten.
+ *
+ * ## The separation, enforced by construction
+ *
+ * CUSTOMER money and PLATFORM money never appear in the same panel, never share a figure, and are
+ * read by two modules that do not import each other (modules/collections vs modules/billing). A
+ * tab boundary is a stronger fence than a heading: no card on this page can accidentally sum
+ * across the two, because no rendered component has both numbers in scope.
+ *
+ * ## Why URL-driven tabs instead of the Radix <Tabs> used elsewhere
+ *
+ * Radix Tabs hold their state on the client, which means every tab's data must be fetched and sent
+ * on every visit. Each of these three panels runs its own set of database reads; two thirds of that
+ * work would be thrown away on each page load, on a page a manager opens all day. Keying off the
+ * URL means only the active panel is rendered at all — and it makes each tab linkable, which is
+ * what lets the dashboard's three finance figures land directly on the panel that explains them.
+ */
+
+const TABS = [
+  { key: "receivables", label: "المستحقات على العملاء", description: "ما لك على عملاء الشحن — من عليه، ومنذ متى" },
+  { key: "close", label: "إقفال اليوم", description: "من قبض اليوم، وكم يجب أن يكون في الصندوق" },
+  { key: "platform", label: "رسوم المنصة", description: "ما على الشركة للمنصة — الفواتير والمدفوعات" },
+] as const;
+
+type TabKey = (typeof TABS)[number]["key"];
+
+const AGING_KEYS: AgingKey[] = ["0-7", "8-14", "15-30", "30+"];
 
 export default async function BillingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ invoice?: string; limit?: string }>;
+  searchParams: Promise<{ tab?: string; invoice?: string; limit?: string; branchId?: string; aging?: string; date?: string }>;
 }) {
   const user = await requireCompanyUser();
+  // Unchanged gate. Customer receivables are as sensitive as platform invoices and answer to the
+  // same permission — this program adds screens, never a new permission or a new way in.
   requireCan(user, "billing", "view");
+
   const sp = await searchParams;
-  const limit = Math.max(INVOICE_PAGE_SIZE, Number(sp.limit) || INVOICE_PAGE_SIZE);
+  const tab: TabKey = TABS.some((t) => t.key === sp.tab) ? (sp.tab as TabKey) : "receivables";
+  const active = TABS.find((t) => t.key === tab)!;
+  const branchScope = getBranchScope(user);
 
-  const [invoices, currentFee, summary, submissions] = await Promise.all([
-    listCompanyInvoiceStates(user.companyId!),
-    getCurrentPlatformFee(),
-    billingSummary(user.companyId!),
-    listCompanySubmissions(user.companyId!),
-  ]);
+  // Only fetched for the tab that offers a branch filter, and only for a role that can widen its
+  // own view — a branch-scoped employee has nothing to choose between.
+  const branches = tab === "receivables" && !branchScope ? await listBranches(user.companyId!) : [];
 
-  const selected = invoices.find((inv) => inv.id === sp.invoice) ?? invoices[0];
-  const entries = selected ? await listInvoiceCartonEntries(user.companyId!, selected.id) : [];
-  const visibleInvoices = invoices.slice(0, limit);
+  // Validated against the known keys rather than passed through: an arbitrary ?aging= value would
+  // otherwise silently match nothing and render an empty screen that looks like "no debt".
+  const aging = AGING_KEYS.includes(sp.aging as AgingKey) ? (sp.aging as AgingKey) : undefined;
+  // Same for the date: a malformed ?date= must fall back to today, not to an empty day.
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? "") ? sp.date! : businessToday();
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2 print:hidden">
-        <div>
-          <h2 className="text-xl font-bold">المالية</h2>
-          <p className="text-sm text-muted-foreground">ملخص فواتير ورسوم المنصة</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <ExportInvoicesButton />
-        </div>
+      <div className="print:hidden">
+        <PageHeader
+          title="المالية"
+          description={active.description}
+          actions={tab === "platform" ? <ExportInvoicesButton /> : undefined}
+        />
       </div>
 
-      {selected ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Label keys off `state` (the derived badge everything else on this page reads), not the
-              raw Invoice.status — those two disagree the moment a payment claim is pending. */}
-          <StatCard
-            label={`المتبقي${selected.state === "UNPAID" ? " من آخر فاتورة غير مسددة" : ""}`}
-            value={`${selected.remaining.toLocaleString()} ر.ي`}
-            icon={Wallet}
-            tone="warning"
-          />
-          <StatCard label="المدفوع" value={`${selected.settled.toLocaleString()} ر.ي`} icon={CheckCircle2} tone="success" />
-          <StatCard label="رسوم المنصة" value={`${selected.totalAmount.toLocaleString()} ر.ي`} icon={Landmark} tone="primary" />
-          <StatCard label="الكراتين المفوترة" value={selected.cartonCount.toLocaleString()} icon={Boxes} tone="info" />
-        </div>
-      ) : (
-        // No invoice has been generated yet this period — still surface the accrued, not-yet-
-        // invoiced ledger totals instead of showing nothing at all (see billingSummary's docstring:
-        // CARTON_FEE entries only, independent of any Invoice row existing).
-        <div className="grid grid-cols-2 gap-4">
-          <StatCard label="رسوم المنصة (غير مفوترة بعد)" value={`${summary.totalAmount.toLocaleString()} ر.ي`} icon={Landmark} tone="primary" />
-          <StatCard label="الكراتين غير المفوترة" value={summary.totalCartons.toLocaleString()} icon={Boxes} tone="info" />
-        </div>
+      <BillingTabs active={tab} />
+
+      {tab === "receivables" && (
+        <ReceivablesPanel
+          companyId={user.companyId!}
+          branchScope={branchScope}
+          branchId={sp.branchId}
+          aging={aging}
+          branches={branches}
+        />
       )}
-
-      {/* State-driven guidance: the company should know what to do next without reading a table. */}
-      {selected?.state === "AWAITING_REVIEW" && (
-        <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-primary print:hidden">
-          <Clock className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            تم استلام إبلاغك بدفع {selected.pendingAmount.toLocaleString()} ر.ي وهو بانتظار مراجعة المنصة.
-            لن يظهر ضمن المدفوع حتى يتم اعتماده.
-          </span>
-        </div>
-      )}
-      {selected?.state === "REJECTED" && selected.lastRejection && (
-        <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive print:hidden">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            تم رفض إثبات الدفع{selected.lastRejection.reason ? `: ${selected.lastRejection.reason}` : "."} يمكنك
-            إعادة الإرسال بإثبات صحيح.
-          </span>
-        </div>
-      )}
-
-      <Card>
-        <CardHeader><CardTitle className="text-base">الفواتير</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-8"></TableHead>
-                <TableHead>رقم الفاتورة</TableHead>
-                <TableHead>الفترة</TableHead>
-                <TableHead>الكراتين</TableHead>
-                <TableHead>المبلغ</TableHead>
-                <TableHead>المدفوع</TableHead>
-                <TableHead>المتبقي</TableHead>
-                <TableHead>حالة الفاتورة</TableHead>
-                <TableHead className="print:hidden"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visibleInvoices.map((inv) => {
-                const isSelected = inv.id === selected?.id;
-                return (
-                  <TableRow key={inv.id} className={isSelected ? "bg-primary/5 hover:bg-primary/10" : ""}>
-                    <TableCell>
-                      <ChevronLeft className={isSelected ? "h-4 w-4 text-primary" : "h-4 w-4 text-transparent"} />
-                    </TableCell>
-                    <TableCell>
-                      <Link href={`/app/billing?invoice=${inv.id}`} className="font-medium text-primary hover:underline">
-                        {inv.invoiceNumber}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {formatBusinessDateTime(inv.periodStart, { day: "numeric", month: "long" })} – {formatBusinessDateTime(inv.periodEnd, { day: "numeric", month: "long", year: "numeric" })}
-                    </TableCell>
-                    <TableCell>{inv.cartonCount.toLocaleString()}</TableCell>
-                    <TableCell>{inv.totalAmount.toLocaleString()} ر.ي</TableCell>
-                    <TableCell className="text-success">{inv.settled.toLocaleString()} ر.ي</TableCell>
-                    <TableCell className={inv.remaining > 0 ? "text-warning" : ""}>{inv.remaining.toLocaleString()} ر.ي</TableCell>
-                    <TableCell><Badge variant="outline" className={INVOICE_STATE_STYLES[inv.state]}>{INVOICE_STATE_LABELS[inv.state]}</Badge></TableCell>
-                    <TableCell className="print:hidden">
-                      <Button asChild variant="outline" size="sm">
-                        <Link href={`/app/billing?invoice=${inv.id}`}><Eye className="h-4 w-4" /> عرض الفاتورة</Link>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {invoices.length === 0 && <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">لا توجد فواتير بعد</TableCell></TableRow>}
-            </TableBody>
-          </Table>
-          {invoices.length > visibleInvoices.length && (
-            <div className="border-t p-2 print:hidden">
-              <Button asChild variant="ghost" size="sm" className="w-full">
-                <Link href={`/app/billing?invoice=${selected?.id ?? ""}&limit=${limit + INVOICE_PAGE_SIZE}`}>
-                  عرض المزيد <ChevronDown className="h-4 w-4" />
-                </Link>
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {selected && (
-        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-base">
-                تفاصيل الفاتورة {selected.invoiceNumber}
-                <p className="mt-0.5 text-xs font-normal text-muted-foreground">
-                  {formatBusinessDateTime(selected.periodStart, { day: "numeric", month: "long", year: "numeric" })} – {formatBusinessDateTime(selected.periodEnd, { day: "numeric", month: "long", year: "numeric" })}
-                </p>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-4">
-              <SummaryRow label="إجمالي الكراتين" value={`${selected.cartonCount.toLocaleString()} كرتون`} />
-              <SummaryRow label="سعر الكرتون" value={`${(entries[0]?.feePerCarton ?? currentFee).toLocaleString()} ر.ي`} />
-              <SummaryRow label="إجمالي الرسوم" value={`${selected.totalAmount.toLocaleString()} ر.ي`} />
-              <SummaryRow label="المدفوع" value={`${selected.settled.toLocaleString()} ر.ي`} valueClassName="text-success" />
-              <SummaryRow label="المتبقي" value={`${selected.remaining.toLocaleString()} ر.ي`} valueClassName={selected.remaining > 0 ? "text-warning" : ""} />
-              <div className="flex items-center justify-between border-t pt-3">
-                <span className="text-sm text-muted-foreground">حالة الفاتورة</span>
-                <Badge variant="outline" className={INVOICE_STATE_STYLES[selected.state]}>
-                  {INVOICE_STATE_LABELS[selected.state]}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2 pt-2 print:hidden">
-                {selected.state !== "PAID" && selected.state !== "CANCELLED" && (
-                  <ReportPaymentDialog
-                    invoiceId={selected.id}
-                    invoiceNumber={selected.invoiceNumber}
-                    remaining={selected.remaining}
-                    disabled={selected.state === "AWAITING_REVIEW"}
-                  />
-                )}
-                <DownloadPdfButton />
-                <InvoiceActionsMenu invoiceNumber={selected.invoiceNumber} />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle className="text-base">تفاصيل الكراتين حسب الشحنات</CardTitle></CardHeader>
-            <CardContent className="p-0">
-              <ShipmentBreakdownTable entries={entries} />
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      <Card className="print:hidden">
-        <CardHeader><CardTitle className="text-base">سجل المدفوعات</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          {submissions.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">لم تُبلّغ عن أي دفعة بعد</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>التاريخ</TableHead>
-                  <TableHead>الفاتورة</TableHead>
-                  <TableHead>المبلغ</TableHead>
-                  <TableHead>الطريقة</TableHead>
-                  <TableHead>المرجع</TableHead>
-                  <TableHead>الحالة</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {submissions.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatBusinessDateTime(s.createdAt, { day: "numeric", month: "long", year: "numeric" })}
-                    </TableCell>
-                    <TableCell dir="ltr" className="text-sm">{s.invoice.invoiceNumber}</TableCell>
-                    <TableCell>{s.amount.toLocaleString()} ر.ي</TableCell>
-                    <TableCell className="text-sm">{PAYMENT_METHOD_LABELS[s.method] ?? s.method}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground" dir="ltr">{s.reference || "—"}</TableCell>
-                    <TableCell>
-                      <SubmissionBadge status={s.status as SubmissionStatus} reason={s.rejectionReason} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {tab === "close" && <DailyClosePanel companyId={user.companyId!} branchScope={branchScope} day={day} />}
+      {tab === "platform" && <PlatformFeesPanel companyId={user.companyId!} invoiceId={sp.invoice} limit={sp.limit} />}
     </div>
   );
 }
 
-const SUBMISSION_BADGE_STYLES: Record<SubmissionStatus, string> = {
-  PENDING: "border-warning/30 bg-warning/15 text-warning",
-  CONFIRMED: "border-success/30 bg-success/15 text-success",
-  REJECTED: "border-destructive/30 bg-destructive/10 text-destructive",
-};
-
-function SubmissionBadge({ status, reason }: { status: SubmissionStatus; reason?: string | null }) {
+/**
+ * Links dressed as tabs — deliberately not the Radix TabsList, which would need a client component
+ * to drive navigation and would then be a tab bar that is neither a real tab widget (its panels
+ * live on other requests) nor a real nav. These are anchors: middle-click opens a tab, the browser
+ * back button steps between them, and a screen reader announces them as what they are.
+ *
+ * The active underline is the same `after:` treatment TabsTrigger's `line` variant uses, so the
+ * three financial views read as the same control the shipment page already taught.
+ */
+function BillingTabs({ active }: { active: TabKey }) {
   return (
-    <span className="flex flex-col gap-0.5">
-      <Badge variant="outline" className={SUBMISSION_BADGE_STYLES[status]}>
-        {SUBMISSION_STATUS_LABELS[status]}
-      </Badge>
-      {status === "REJECTED" && reason && (
-        <span className="text-[11px] text-muted-foreground">{reason}</span>
-      )}
-    </span>
-  );
-}
-
-function SummaryRow({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`font-medium ${valueClassName ?? ""}`}>{value}</span>
-    </div>
+    <nav aria-label="أقسام المالية" className="-mb-px flex gap-1 overflow-x-auto border-b print:hidden">
+      {TABS.map((t) => {
+        const isActive = t.key === active;
+        return (
+          <Link
+            key={t.key}
+            href={`/app/billing?tab=${t.key}`}
+            aria-current={isActive ? "page" : undefined}
+            className={cn(
+              "relative whitespace-nowrap px-3 py-2.5 text-sm font-medium transition-colors",
+              "after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-foreground after:opacity-0",
+              isActive ? "text-foreground after:opacity-100" : "text-foreground/60 hover:text-foreground"
+            )}
+          >
+            {t.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }

@@ -6,9 +6,11 @@ import { getVehicleDetail } from "@/modules/vehicles/service";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ActiveBadge } from "@/components/ui/status-badge";
 import { Badge } from "@/components/ui/badge";
-import { Truck, ChevronRight, Route } from "lucide-react";
+import { Truck, Route } from "lucide-react";
 import { VEHICLE_TYPE_LABELS, TRIP_STATUS_LABELS, type VehicleType, type TripStatus } from "@/lib/enums";
-import { formatBusinessDateTime } from "@/lib/timezone";
+import { formatDate } from "@/lib/timezone";
+import { PageHeader } from "@/components/shell/page-header";
+import { routeLabel } from "@/lib/utils";
 
 function Field({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
   return (
@@ -30,22 +32,13 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
 
   return (
     <div className="space-y-4">
-      <Link href="/app/vehicles" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ChevronRight className="h-4 w-4" /> رجوع إلى المركبات
-      </Link>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Truck className="h-6 w-6" />
-        </div>
-        <div>
-          <h2 className="flex items-center gap-2 text-xl font-bold" dir="ltr">
-            {vehicle.plateNumber}
-            <span dir="rtl"><ActiveBadge active={vehicle.isActive} activeLabel="نشطة" inactiveLabel="غير نشطة" /></span>
-          </h2>
-          <p className="text-sm text-muted-foreground">{VEHICLE_TYPE_LABELS[vehicle.type as VehicleType] ?? vehicle.type ?? "—"}</p>
-        </div>
-      </div>
+      <PageHeader
+        variant="record"
+        title={vehicle.plateNumber}
+        description={VEHICLE_TYPE_LABELS[vehicle.type as VehicleType] ?? vehicle.type ?? "—"}
+        badge={<ActiveBadge active={vehicle.isActive} activeLabel="نشطة" inactiveLabel="غير نشطة" />}
+        parent={{ label: "المركبات", href: "/app/vehicles" }}
+      />
 
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-1.5 text-base"><Truck className="h-4 w-4" /> معلومات المركبة</CardTitle></CardHeader>
@@ -63,7 +56,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
               )
             }
           />
-          {lastTrip && <Field label="تاريخ آخر رحلة" value={formatBusinessDateTime(lastTrip.createdAt, { day: "2-digit", month: "2-digit", year: "numeric" })} />}
+          {lastTrip && <Field label="تاريخ آخر رحلة" value={formatDate(lastTrip.createdAt)} />}
           {lastTrip?.driver && <Field label="سائق آخر رحلة" value={lastTrip.driver.name} />}
           <div className="sm:col-span-2">
             <Field label="ملاحظات" value={vehicle.notes || "—"} />
@@ -76,7 +69,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
           <CardHeader><CardTitle className="flex items-center gap-1.5 text-base"><Route className="h-4 w-4" /> آخر الرحلات</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {vehicle.trips.map((t) => {
-              const route = t.stops.length > 1 ? `${t.stops[0].branch.name} ← ${t.stops[t.stops.length - 1].branch.name}` : t.stops[0]?.branch.name;
+              const route = t.stops.length > 1 ? routeLabel(t.stops[0].branch.name, t.stops[t.stops.length - 1].branch.name) : t.stops[0]?.branch.name;
               return (
                 <Link
                   key={t.id}
@@ -90,7 +83,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
                   </div>
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Badge variant="outline">{TRIP_STATUS_LABELS[t.status as TripStatus] ?? t.status}</Badge>
-                    <span>{formatBusinessDateTime(t.createdAt, { day: "2-digit", month: "2-digit", year: "numeric" })}</span>
+                    <span>{formatDate(t.createdAt)}</span>
                   </div>
                 </Link>
               );

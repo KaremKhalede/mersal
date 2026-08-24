@@ -10,6 +10,7 @@ import {
   cleanupTenant,
   TEST_PASSWORD,
   expectNotFound,
+  visibleText,
 } from "./helpers";
 
 test.describe("Scenario P — branch-level data access (Phase 5 P0)", () => {
@@ -60,18 +61,18 @@ test.describe("Scenario P — branch-level data access (Phase 5 P0)", () => {
 
     // Shipments list: A-touching shipment visible, B-only shipment is not
     await page.goto("/app/shipments");
-    await expect(page.locator(`text=${shipmentAtA.shipmentNumber}`)).toBeVisible();
+    await expect(visibleText(page, shipmentAtA.shipmentNumber)).toBeVisible();
     await expect(page.locator(`text=${shipmentAtB.shipmentNumber}`)).toHaveCount(0);
 
     // Shipment detail: a direct URL to the out-of-branch shipment must refuse and leak nothing.
     await page.goto(`/app/shipments/${shipmentAtB.id}`);
     await expectNotFound(page, [shipmentAtB.shipmentNumber]);
     await page.goto(`/app/shipments/${shipmentAtA.id}`);
-    await expect(page.locator(`text=${shipmentAtA.shipmentNumber}`)).toBeVisible();
+    await expect(page.locator("h1", { hasText: shipmentAtA.shipmentNumber })).toBeVisible();
 
     // Trips list: only the trip whose stops include branch A
     await page.goto("/app/trips");
-    await expect(page.locator(`text=${tripAtA.tripNumber}`)).toBeVisible();
+    await expect(visibleText(page, tripAtA.tripNumber)).toBeVisible();
     await expect(page.locator(`text=${tripAtB.tripNumber}`)).toHaveCount(0);
     await page.goto(`/app/trips/${tripAtB.id}`);
     await expectNotFound(page, [tripAtB.tripNumber]);
@@ -117,8 +118,8 @@ test.describe("Scenario P — branch-level data access (Phase 5 P0)", () => {
 
     await login(page, tenant.adminEmail);
     await page.goto("/app/shipments");
-    await expect(page.locator(`text=${shipmentAtA.shipmentNumber}`)).toBeVisible();
-    await expect(page.locator(`text=${shipmentAtB.shipmentNumber}`)).toBeVisible();
+    await expect(visibleText(page, shipmentAtA.shipmentNumber)).toBeVisible();
+    await expect(visibleText(page, shipmentAtB.shipmentNumber)).toBeVisible();
 
     await cleanupTenant(tenant.company.id);
   });
@@ -144,8 +145,8 @@ test.describe("Scenario P — branch-level data access (Phase 5 P0)", () => {
 
     await login(page, email);
     await page.goto("/app/shipments");
-    await expect(page.locator(`text=${shipmentAtA.shipmentNumber}`)).toBeVisible();
-    await expect(page.locator(`text=${shipmentAtB.shipmentNumber}`)).toBeVisible();
+    await expect(visibleText(page, shipmentAtA.shipmentNumber)).toBeVisible();
+    await expect(visibleText(page, shipmentAtB.shipmentNumber)).toBeVisible();
 
     await cleanupTenant(tenant.company.id);
   });
@@ -173,7 +174,7 @@ test.describe("Scenario P — branch-level data access (Phase 5 P0)", () => {
 
     await login(page, tenant.driverEmail);
     await page.goto("/driver");
-    await expect(page.locator(`text=${myTrip.tripNumber}`)).toBeVisible();
+    await expect(visibleText(page, myTrip.tripNumber)).toBeVisible();
     await expect(page.locator(`text=${otherTrip.tripNumber}`)).toHaveCount(0);
 
     // Direct URL to the other driver's trip must refuse, not render their manifest.

@@ -115,7 +115,7 @@ test.describe("Scenario N — money is exact decimal, never floating point", () 
     expect(total).toBe(totalCartons * 5);
 
     await login(page, tenant.adminEmail);
-    await page.goto("/app/billing");
+    await page.goto("/app/billing?tab=platform");
     await expect(page.locator(`text=${totalCartons * 5}`).first()).toBeVisible();
 
     await cleanupTenant(tenant.company.id);

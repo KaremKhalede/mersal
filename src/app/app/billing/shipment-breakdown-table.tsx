@@ -5,7 +5,8 @@ import Link from "next/link";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { ListFilter } from "lucide-react";
-import { formatBusinessDateTime } from "@/lib/timezone";
+import { formatDate } from "@/lib/timezone";
+import { formatYER } from "@/lib/money";
 
 type Entry = {
   id: string;
@@ -36,7 +37,7 @@ export function ShipmentBreakdownTable({ entries }: { entries: Entry[] }) {
           {visible.map((e) => (
             <TableRow key={e.id}>
               <TableCell className="text-muted-foreground text-sm">
-                {formatBusinessDateTime(e.createdAt, { day: "numeric", month: "long", year: "numeric" })}
+                {formatDate(e.createdAt)}
               </TableCell>
               <TableCell>
                 {e.shipment ? (
@@ -48,7 +49,7 @@ export function ShipmentBreakdownTable({ entries }: { entries: Entry[] }) {
                 )}
               </TableCell>
               <TableCell>{e.cartonCount}</TableCell>
-              <TableCell className="font-medium">{e.amount.toLocaleString()} ر.ي</TableCell>
+              <TableCell className="font-medium">{formatYER(e.amount)}</TableCell>
             </TableRow>
           ))}
           {entries.length === 0 && (

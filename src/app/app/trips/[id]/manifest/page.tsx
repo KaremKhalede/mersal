@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ChevronRight, ClipboardList } from "lucide-react";
 import { PrintButton } from "@/components/labels/print-button";
-import { formatBusinessDateTime } from "@/lib/timezone";
+import { formatDate } from "@/lib/timezone";
 import { VEHICLE_TYPE_LABELS, type VehicleType } from "@/lib/enums";
 
 function Field({ label, value, ltr }: { label: string; value: string; ltr?: boolean }) {
@@ -35,7 +35,7 @@ export default async function TripManifestPage({ params }: { params: Promise<{ i
   if (!data) notFound();
 
   const { trip, origin, destination, shipments, totalCartons, totalWeightKg } = data;
-  const issuedAt = formatBusinessDateTime(new Date(), { year: "numeric", month: "long", day: "numeric" });
+  const issuedAt = formatDate(new Date());
 
   return (
     <div className="p-4 print:p-0">
@@ -49,9 +49,22 @@ export default async function TripManifestPage({ params }: { params: Promise<{ i
       <div dir="rtl" className="mx-auto max-w-[210mm] space-y-5 rounded-xl border bg-card p-6 print:max-w-none print:space-y-4 print:rounded-none print:border-0 print:p-0">
         <div className="flex items-start justify-between gap-4 border-b pb-4">
           <div className="flex items-center gap-3">
+            {/*
+              An outlined tile, not a filled one.
+
+              This was a solid `backgroundColor` with `text-white` on top. Print engines drop
+              background graphics by default — Chrome's preview has them off, and thermal/POS
+              drivers ignore CSS backgrounds outright — so on paper the fill disappeared and left a
+              white letter on white: the company's mark, invisible, on the document a driver signs.
+              Same class of bug the carton label's barcode already had, and the reason the invoice
+              document was built with text identity from the start.
+
+              The colour survives as a border and as the letter itself, both of which are page
+              content rather than background, so it prints exactly as it renders.
+            */}
             <span
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-base font-bold text-white"
-              style={{ backgroundColor: user.company!.logoColor }}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border-2 text-base font-bold"
+              style={{ borderColor: user.company!.logoColor, color: user.company!.logoColor }}
             >
               {user.company!.name.trim().slice(0, 1)}
             </span>
@@ -70,7 +83,7 @@ export default async function TripManifestPage({ params }: { params: Promise<{ i
           <p className="text-sm font-semibold mb-2">بيانات الرحلة</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <Field label="رقم الرحلة" value={trip.tripNumber} />
-            <Field label="تاريخ الرحلة" value={formatBusinessDateTime(trip.createdAt, { year: "numeric", month: "numeric", day: "numeric" })} />
+            <Field label="تاريخ الرحلة" value={formatDate(trip.createdAt)} />
             <Field label="نوع الرحلة" value="بري" />
             <Field label="من" value={origin?.name ?? "—"} />
             <Field label="إلى" value={destination?.name ?? "—"} />
@@ -138,7 +151,7 @@ export default async function TripManifestPage({ params }: { params: Promise<{ i
           ملاحظات: كشف حمولة تشغيلي داخلي، وليس مانيفستًا جمركيًا رسميًا أو بديلًا عن مستندات الجمارك.
         </div>
 
-        <div className="grid grid-cols-2 gap-4 pt-2">
+        <div className="grid grid-cols-2 gap-4 pt-2 break-inside-avoid">
           <div className="rounded-lg border p-3 text-sm">
             <p className="font-medium mb-6">توقيع السائق</p>
             <p className="text-muted-foreground">الاسم: {trip.driver?.name ?? "—"}</p>

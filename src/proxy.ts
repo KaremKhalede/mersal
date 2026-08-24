@@ -19,12 +19,22 @@ export async function proxy(req: NextRequest) {
   // /reset/<token> is public by necessity: the whole reason someone opens it is that they cannot
   // sign in. The token in the URL is the only credential, re-checked server-side on every submit.
   const isPublic =
-    pathname.startsWith("/track") || pathname.startsWith("/reset") || pathname === "/login" || pathname.startsWith("/api");
+    pathname.startsWith("/track") ||
+    // The customer's own tracking link. Short because its whole life is inside a WhatsApp message;
+    // public because the token in it IS the credential.
+    pathname.startsWith("/t/") ||
+    pathname.startsWith("/reset") ||
+    pathname === "/login" ||
+    pathname.startsWith("/api");
 
   const session = await readSession(req);
 
   if (pathname === "/") {
-    if (!session) return NextResponse.redirect(new URL("/login", req.url));
+    // An anonymous visitor to the bare domain gets the public shipment lookup, not the staff login
+    // screen. Customers outnumber employees by orders of magnitude and are the ones with no other
+    // way in once their WhatsApp link is gone; employees bookmark /login, and /track links to it.
+    // Signed-in users are unaffected — every branch below still routes them to their own app.
+    if (!session) return NextResponse.redirect(new URL("/track", req.url));
     if (session.userType === "PLATFORM_ADMIN") return NextResponse.redirect(new URL("/platform", req.url));
     if (session.userType === "DRIVER") return NextResponse.redirect(new URL("/driver", req.url));
     return NextResponse.redirect(new URL("/app", req.url));
@@ -45,10 +55,14 @@ export async function proxy(req: NextRequest) {
 
   // /reset is throttled with /login's tighter budget, not /track's: a reset token is a credential
   // that sets a password, so the request pattern to guard against is guessing, not browsing.
-  const throttled = pathname === "/login" || pathname.startsWith("/track") || pathname.startsWith("/reset");
+  const throttled =
+    pathname === "/login" || pathname.startsWith("/track") || pathname.startsWith("/t/") || pathname.startsWith("/reset");
   if (throttled && !isBypassed) {
     const ip = clientIpFrom(req.headers);
-    const bucket = pathname.startsWith("/track") ? "track" : pathname.startsWith("/reset") ? "reset" : "login";
+    // /t/ shares the track budget: both are the same public surface, and an attacker walking
+    // one should not get a fresh allowance by switching to the other.
+    const bucket =
+      pathname.startsWith("/track") || pathname.startsWith("/t/") ? "track" : pathname.startsWith("/reset") ? "reset" : "login";
     const limit = bucket === "track" ? { max: 30, windowMs: 5 * 60 * 1000 } : { max: 10, windowMs: 5 * 60 * 1000 };
     const allowed = await checkRateLimit(`${bucket}:${ip}`, limit);
     if (!allowed) {

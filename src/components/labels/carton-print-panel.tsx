@@ -59,7 +59,12 @@ export function CartonPrintPanel({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [columns, setColumns] = useState<2 | 3>(3);
-  const [showBarcode, setShowBarcode] = useState(true);
+  // Off by default. The strip is explicitly decorative — DecorativeBarcode's own docstring says it
+  // "never claims to be scannable", there is no symbology and no checksum — yet it shipped on every
+  // label, taking roughly a quarter of a 100x150mm card and inviting a warehouse worker to point a
+  // scanner at something that cannot answer. The QR beside it carries the real carton code. Still
+  // one click away in خيارات الطباعة for anyone who wants the visual weight.
+  const [showBarcode, setShowBarcode] = useState(false);
   const [showQR, setShowQR] = useState(true);
   const [preview, setPreview] = useState(false);
 

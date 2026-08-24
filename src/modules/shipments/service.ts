@@ -145,6 +145,27 @@ export async function createShipment(input: CreateShipmentInput) {
     metadata: { shipmentNumber },
   });
 
+  // Money taken at the counter during intake ("المدفوع الآن" on the new-shipment dialog) is a cash
+  // movement exactly like one taken later through recordPayment — same drawer, same employee, same
+  // day. It just never left a trace anyone could add up: the CREATE entry above records only the
+  // shipment number, so the daily close (src/modules/collections/service.ts) had no event for it
+  // and the till would come up short by every prepaid shipment registered that day.
+  //
+  // Emitted as RECORD_PAYMENT, not a new action name, so there is ONE payment event stream to walk
+  // rather than two shapes to reconcile — and `metadata.amountPaid` carries the same meaning it
+  // does in recordPayment: the shipment's cumulative paid total *after* this payment, which for an
+  // intake payment is the payment itself. recordPayment is deliberately untouched.
+  if (input.amountPaid) {
+    await logAudit({
+      companyId: input.companyId,
+      userId: input.createdById,
+      action: "RECORD_PAYMENT",
+      entityType: "Shipment",
+      entityId: shipment.id,
+      metadata: { amountPaid: input.amountPaid, paymentMethod: input.paymentMethod ?? "CASH" },
+    });
+  }
+
   return shipment;
 }
 
@@ -209,15 +230,53 @@ export async function updateShipmentStatus(
   return updated;
 }
 
+/**
+ * "The customer still owes on this one." Byte-for-byte the condition billingSummary reduces over
+ * (src/modules/billing/service.ts) — cancelled shipments are out, and a shipment with no agreed
+ * price yet is out too: nothing is owed on a price that was never set, and `amountPaid < NULL` is
+ * unknown in SQL anyway, so it must be excluded explicitly rather than left to the comparison.
+ *
+ * The comparison is column-to-column via a Prisma field reference, not a raw query — fully paid
+ * (amountPaid == shippingPrice) drops out, partly paid and unpaid both stay in.
+ */
+export const UNPAID_WHERE = {
+  status: { not: "CANCELLED" as const },
+  shippingPrice: { not: null },
+  amountPaid: { lt: prisma.shipment.fields.shippingPrice },
+};
+
+/**
+ * The one column this list can be reordered by, and the two directions it takes.
+ *
+ * Deliberately not a generic "sort by any column" facility. The list has one question that a
+ * different order actually answers — "what has been sitting here longest" — and every other column
+ * either has no ordering anyone asks for (route, customer) or is better answered somewhere else:
+ * "who owes the most" is the receivables tab (modules/collections/service.ts), which groups by
+ * customer and ages the balance, rather than a flat scan of shipment rows.
+ *
+ * Sorting by the outstanding balance would also mean ordering on `shippingPrice - amountPaid`, an
+ * expression Prisma cannot order by — so it would need raw SQL or an in-memory sort that silently
+ * breaks pagination. Not worth it for a question that already has a better screen.
+ */
+export const SHIPMENT_SORT_DIRECTIONS = ["desc", "asc"] as const;
+export type ShipmentSortDirection = (typeof SHIPMENT_SORT_DIRECTIONS)[number];
+
 export async function listShipments(params: {
   companyId: string;
   status?: ShipmentStatus;
   search?: string;
   page?: number;
   pageSize?: number;
+  /** Creation date order. "desc" (newest first) is the default the list has always had; "asc"
+   *  surfaces the oldest rows, which is how a stuck shipment gets found. */
+  dir?: ShipmentSortDirection;
   /** Restricts to shipments that touch this branch (load/unload/current) — set for
    * branch-scoped roles, omitted for company-wide roles. See src/lib/branch-scope.ts. */
   branchId?: string | null;
+  /** Only shipments the customer still owes money on — the same predicate billingSummary sums
+   * into the dashboard's "المتبقي على العملاء", so the list can never disagree with the figure
+   * that links to it. See UNPAID_WHERE. */
+  unpaid?: boolean;
 }) {
   const page = params.page ?? 1;
   const pageSize = params.pageSize ?? 20;
@@ -229,6 +288,7 @@ export async function listShipments(params: {
     ...(params.status ? { status: params.status } : {}),
     AND: [
       params.branchId ? shipmentTouchesBranch(params.branchId) : {},
+      params.unpaid ? UNPAID_WHERE : {},
       params.search
         ? {
             OR: [
@@ -238,6 +298,11 @@ export async function listShipments(params: {
               { shipmentNumber: { contains: params.search.toUpperCase() } },
               { receiverName: { contains: params.search } },
               { receiverPhone: { contains: params.search } },
+              // A carton code is the shipment number plus "-C{n}" (see createShipment), so pasting
+              // a whole code found nothing: `contains` asks whether SH-100001 contains
+              // SH-100001-C3, which is the test backwards. Matching the carton itself makes the
+              // string printed on the box a working search term.
+              { cartons: { some: { cartonCode: { contains: params.search.toUpperCase() } } } },
             ],
           }
         : {},
@@ -248,7 +313,7 @@ export async function listShipments(params: {
     prisma.shipment.findMany({
       where,
       include: { customer: true, loadBranch: true, unloadBranch: true, currentBranch: true },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: params.dir === "asc" ? "asc" : "desc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
@@ -275,7 +340,7 @@ export async function shipmentStatusCounts(companyId: string, branchId?: string 
 
 /** Every matching shipment, unpaginated — backs the "تصدير" CSV export, which must cover the
  * whole filtered set, not just the page currently on screen. */
-export async function listShipmentsForExport(params: { companyId: string; status?: ShipmentStatus; search?: string; branchId?: string | null }) {
+export async function listShipmentsForExport(params: { companyId: string; status?: ShipmentStatus; search?: string; branchId?: string | null; unpaid?: boolean; dir?: ShipmentSortDirection }) {
   const { items } = await listShipments({ ...params, page: 1, pageSize: 10_000 });
   return items;
 }
@@ -700,6 +765,37 @@ export async function listExceptions(companyId: string, branchId?: string | null
  * session, so this function is deliberately the single public reader and returns only what the
  * tracking page renders.
  */
+/**
+ * The public lookup's read path: find a shipment by the number printed on its receipt.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * THIS IS NOT A SECOND getShipmentByTrackingToken
+ * ---------------------------------------------------------------------------------------------
+ * Shipment numbers come from a Postgres sequence (SH-100001, SH-100002, ...) and are deliberately
+ * guessable — src/lib/ids.ts says so outright, because "security no longer rests on these being
+ * unguessable". That is only true while nothing hands out capability in exchange for one.
+ *
+ * So this function returns the shipment WITHOUT its tracking token, and its caller
+ * (src/app/track/actions.ts) never renders the two actions that redirect cartons. Knowing a
+ * shipment number plus the receiver's last four digits buys a READ of one shipment — the same read
+ * a forwarded WhatsApp link already grants — and nothing else. The token, and therefore the ability
+ * to move goods, stays with whoever actually received the message.
+ *
+ * Deliberately reuses getShipmentByTrackingToken's own include block by resolving the token first
+ * and delegating: one public read shape, one allow-list, no chance of the two drifting apart into
+ * two different definitions of "what a stranger may see".
+ */
+export async function findShipmentByPublicNumber(shipmentNumber: string) {
+  // Numbers are generated upper-case; a customer copying off a receipt may not be.
+  const row = await prisma.shipment.findUnique({
+    where: { shipmentNumber: shipmentNumber.trim().toUpperCase() },
+    select: { trackingToken: true, receiverPhone: true },
+  });
+  if (!row) return null;
+  const full = await getShipmentByTrackingToken(row.trackingToken);
+  return full ? { shipment: full, receiverPhone: row.receiverPhone } : null;
+}
+
 export async function getShipmentByTrackingToken(trackingToken: string) {
   return prisma.shipment.findUnique({
     where: { trackingToken },

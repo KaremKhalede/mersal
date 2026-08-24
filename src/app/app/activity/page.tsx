@@ -5,7 +5,10 @@ import { prisma } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/enums";
-import { formatBusinessDateTime } from "@/lib/timezone";
+import { formatDateStamp } from "@/lib/timezone";
+import { PageHeader } from "@/components/shell/page-header";
+import { EmptyState, TableEmpty } from "@/components/feedback/empty-state";
+import { History } from "lucide-react";
 
 const ENTITY_LABELS: Record<string, string> = {
   Shipment: "شحنة",
@@ -64,6 +67,8 @@ function describeActivity(action: string, entityType: string, metadata: string |
   }
 }
 
+const ACTIVITY_LIMIT = 150;
+
 export default async function ActivityLogPage() {
   const user = await requireCompanyUser();
   requireCan(user, "reports", "view");
@@ -74,16 +79,19 @@ export default async function ActivityLogPage() {
   // branch-scoped viewer, same as any other branch-scoped list defaults to "not visible" over
   // "visible by default."
   const branchScope = getBranchScope(user);
-  const logs = await prisma.auditLog.findMany({
-    where: { companyId: user.companyId!, ...(branchScope ? { user: { branchId: branchScope } } : {}) },
-    include: { user: true },
-    orderBy: { createdAt: "desc" },
-    take: 150,
-  });
+  const where = { companyId: user.companyId!, ...(branchScope ? { user: { branchId: branchScope } } : {}) };
+  // The count is what makes the cap honest. The list showed 150 rows and said nothing about the
+  // rest, so a company past its first weeks was reading a silently truncated log and had no way to
+  // know it. An audit log is read for recency, not browsed page by page — so the fix is to state
+  // the truncation, not to paginate something nobody pages through.
+  const [logs, total] = await Promise.all([
+    prisma.auditLog.findMany({ where, include: { user: true }, orderBy: { createdAt: "desc" }, take: ACTIVITY_LIMIT }),
+    prisma.auditLog.count({ where }),
+  ]);
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">سجل النشاطات</h2>
+      <PageHeader title="سجل النشاطات" description="أحدث الأحداث على مستوى الشركة" count={total} />
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -101,12 +109,25 @@ export default async function ActivityLogPage() {
                   <TableCell>{l.user?.name ?? "النظام"}</TableCell>
                   <TableCell>{describeActivity(l.action, l.entityType, l.metadata)}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">{ENTITY_LABELS[l.entityType] ?? l.entityType}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatBusinessDateTime(l.createdAt, { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{formatDateStamp(l.createdAt)}</TableCell>
                 </TableRow>
               ))}
-              {logs.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-8">لا توجد نشاطات مسجّلة</TableCell></TableRow>}
+              {logs.length === 0 && (
+                <TableEmpty colSpan={4}>
+                  <EmptyState
+                    icon={History}
+                    title="لا توجد نشاطات بعد"
+                    description="يُسجَّل هنا كل إجراء يقوم به موظفو الشركة — تسجيل شحنة، تأكيد تحميل، تسليم، تعديل بيانات."
+                  />
+                </TableEmpty>
+              )}
             </TableBody>
           </Table>
+          {total > logs.length && (
+            <p className="border-t px-3 py-2 text-xs text-muted-foreground">
+              يعرض أحدث {logs.length.toLocaleString("en-US")} حدثاً من أصل {total.toLocaleString("en-US")}.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

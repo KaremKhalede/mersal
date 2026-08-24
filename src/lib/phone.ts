@@ -44,3 +44,26 @@ export function normalizePhone(raw: string): string | null {
 export function phoneError(raw: string, label: string): string | null {
   return normalizePhone(raw) ? null : `${label} غير صالح — أدخل رقم جوال يمني (7xxxxxxxx) أو سعودي (5xxxxxxxx)`;
 }
+
+/**
+ * A phone number as a human reads it aloud: "+967 771 234 567".
+ *
+ * Numbers were displayed exactly as typed — "+967771234567", twelve unbroken digits — in twenty-odd
+ * places, and reading one off a screen to a customer is something counter staff do dozens of times a
+ * day. Grouping is the whole feature: the eye holds three digits at a time, not twelve.
+ *
+ * Built on normalizePhone so display and dispatch can never disagree about what a number is. Falls
+ * back to the raw string when the number is not one this market recognises — showing a malformed
+ * number verbatim is honest, and it is the same number the FAILED notification row will quote.
+ *
+ * Always render inside dir="ltr": a phone number is an LTR island in Arabic text.
+ */
+export function formatPhoneDisplay(raw: string | null | undefined): string {
+  if (!raw) return "—";
+  const e164 = normalizePhone(raw);
+  if (!e164) return raw;
+  // +967 | 771 234 567 — country code, then the 9 subscriber digits in threes.
+  const cc = e164.slice(0, 4);
+  const rest = e164.slice(4);
+  return `${cc} ${rest.slice(0, 3)} ${rest.slice(3, 6)} ${rest.slice(6)}`;
+}
