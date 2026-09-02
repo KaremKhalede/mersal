@@ -5,6 +5,17 @@ import { MobileSidebar } from "@/components/shell/mobile-sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { can } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
+import { type Metadata } from "next";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const user = await requireCompanyUser();
+  return {
+    title: {
+      template: `%s — ${user.company!.name}`,
+      default: user.company!.name,
+    },
+  };
+}
 
 export default async function CompanyLayout({ children }: { children: React.ReactNode }) {
   const user = await requireCompanyUser();
@@ -62,9 +73,9 @@ export default async function CompanyLayout({ children }: { children: React.Reac
   const items = allItems.filter((i) => !i.resource || can(user, i.resource, "view") || can(user, i.resource, "manage"));
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden print:h-auto print:overflow-visible">
       <AppSidebar brand={user.company!.name} subBrand={user.branch?.name ?? "كل الفروع"} items={items} />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden print:overflow-visible">
         <Topbar
           title={user.company!.name}
           userName={user.name}

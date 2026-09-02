@@ -15,7 +15,6 @@ type Shipment = {
   goodsType: string | null;
   weightKg: number | null;
   notes: string | null;
-  shippingPrice: number | null;
 };
 
 /** Only offered for DRAFT/REGISTERED shipments (see ShipmentActions) — before a trip, customs
@@ -51,10 +50,7 @@ export function EditShipmentDialog({ shipment, open, onOpenChange }: { shipment:
           <Input id="weightKg" name="weightKg" type="number" min={0} defaultValue={shipment.weightKg ?? ""} />
         </div>
       </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="shippingPrice">أجرة الشحن (ر.ي)</Label>
-        <Input id="shippingPrice" name="shippingPrice" type="number" min={0} defaultValue={shipment.shippingPrice ?? ""} />
-      </div>
+
       <div className="space-y-1.5">
         <Label htmlFor="notes">ملاحظات</Label>
         <Textarea id="notes" name="notes" rows={2} defaultValue={shipment.notes ?? ""} />

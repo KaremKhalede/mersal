@@ -12,11 +12,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { CheckCircle2, PackageCheck, Boxes, Printer, Ban, Link2, MoreHorizontal, Pencil, Wallet, AlertTriangle, Receipt } from "lucide-react";
+import { CheckCircle2, PackageCheck, Boxes, Printer, Ban, Link2, MoreHorizontal, Pencil, AlertTriangle, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { receiveShipmentAction, markReadyForPickupAction, confirmRemainingArrivedAction, cancelShipmentAction, confirmBranchPickupAction } from "../actions";
 import { DeliveryProofDialog } from "@/components/shell/delivery-proof-dialog";
-import { PaymentDialog } from "./payment-dialog";
 import { ExceptionDialog } from "./exception-dialog";
 import { EditShipmentDialog } from "./edit-shipment-dialog";
 import { LateCartonDialog } from "./late-carton-dialog";
@@ -37,7 +36,7 @@ type Shipment = {
 
 /** Which of the overflow dialogs is open. One piece of state, not one flag each: they are mutually
  *  exclusive by construction — all of them are opened from the same menu, which closes on select. */
-type OpenDialog = "edit" | "exception" | "cancel" | "payment" | null;
+type OpenDialog = "edit" | "exception" | "cancel" | null;
 
 /**
  * Three controls, not seven.
@@ -59,16 +58,13 @@ type OpenDialog = "edit" | "exception" | "cancel" | "payment" | null;
  * Nothing was removed and no action changed what it does — this is placement only. The dialogs in
  * the menu are rendered as siblings of the DropdownMenu and driven by `openDialog`, not nested
  * inside DropdownMenuItems: Radix unmounts the menu the moment an item is selected, and with it any
- * trigger inside, so a nested dialog would never open. (Same reason PaymentDialog already accepted
- * open/onOpenChange for the handover flow.)
+ * trigger inside, so a nested dialog would never open.
  */
-export function ShipmentActions({ shipment, canRecordPayment }: { shipment: Shipment; canRecordPayment: boolean }) {
+export function ShipmentActions({ shipment }: { shipment: Shipment }) {
   const canRaiseException = !["DELIVERED", "CANCELLED", "EXCEPTION"].includes(shipment.status);
   const missingCartons = shipment.cartons.filter((c) => c.status === "MISSING");
   const missingCartonCodes = missingCartons.map((c) => c.cartonCode);
   const isDraftOrRegistered = shipment.status === "DRAFT" || shipment.status === "REGISTERED";
-  const outstanding = shipment.shippingPrice != null ? Math.max(0, shipment.shippingPrice - shipment.amountPaid) : 0;
-  const hasOutstanding = outstanding > 0;
   const [openDialog, setOpenDialog] = useState<OpenDialog>(null);
 
   function copyTrackingLink() {
@@ -119,8 +115,6 @@ export function ShipmentActions({ shipment, canRecordPayment }: { shipment: Ship
           receiverName={shipment.receiverName}
           missingCartonCodes={missingCartonCodes}
           action={(formData) => confirmBranchPickupAction(shipment.id, formData)}
-          outstanding={outstanding}
-          onSuccess={outstanding > 0 && canRecordPayment ? () => setOpenDialog("payment") : undefined}
         />
       )}
       {/* The only action a closed-but-short shipment still needs: the missing box turning up. It
@@ -131,15 +125,7 @@ export function ShipmentActions({ shipment, canRecordPayment }: { shipment: Ship
         <LateCartonDialog shipmentId={shipment.id} missingCartons={missingCartons} />
       )}
 
-      {/* ---- money, while there is any ----------------------------------------------------- */}
-      {/* Out in the open only while something is owed; once settled it drops into the menu rather
-          than disappearing, so a correction is still one click away. Ungated here exactly as
-          before — recordPaymentAction is the gate, and it re-checks regardless. */}
-      {hasOutstanding && (
-        <Button size="sm" variant="outline" onClick={() => setOpenDialog("payment")}>
-          <Wallet className="h-4 w-4" /> تسجيل دفعة
-        </Button>
-      )}
+
 
       {/* ---- the constant physical task ---------------------------------------------------- */}
       <Button size="sm" variant="outline" asChild>
@@ -169,11 +155,7 @@ export function ShipmentActions({ shipment, canRecordPayment }: { shipment: Ship
               <Receipt className="h-4 w-4" /> طباعة إيصال الاستلام
             </Link>
           </DropdownMenuItem>
-          {!hasOutstanding && (
-            <DropdownMenuItem onSelect={() => setOpenDialog("payment")}>
-              <Wallet className="h-4 w-4" /> تسجيل دفعة
-            </DropdownMenuItem>
-          )}
+
           {isDraftOrRegistered && (
             <DropdownMenuItem onSelect={() => setOpenDialog("edit")}>
               <Pencil className="h-4 w-4" /> تعديل البيانات
@@ -195,19 +177,7 @@ export function ShipmentActions({ shipment, canRecordPayment }: { shipment: Ship
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* ---- dialogs the menu opens -------------------------------------------------------- */}
-      {/* Outside the DropdownMenu and outside every status branch above. Payment in particular has
-          to live out here: confirming a handover changes the status and unmounts the branch that
-          offered it, and the handover's own onSuccess opens this immediately afterwards. Payment
-          stays a separate action with its own permission and errors — a failed one leaves the
-          handover recorded and the shipment unpaid. */}
-      <PaymentDialog
-        shipmentId={shipment.id}
-        amountPaid={shipment.amountPaid}
-        shippingPrice={shipment.shippingPrice}
-        open={openDialog === "payment"}
-        onOpenChange={(o) => setOpenDialog(o ? "payment" : null)}
-      />
+
       {isDraftOrRegistered && (
         <>
           <EditShipmentDialog

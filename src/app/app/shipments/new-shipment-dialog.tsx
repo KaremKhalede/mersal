@@ -72,32 +72,7 @@ export function NewShipmentDialog({ branches }: { branches: { id: string; name: 
           <Input id="goodsType" name="goodsType" placeholder="بضاعة عامة" />
         </div>
       </div>
-      {/* The counter conversation is one sentence — "الأجرة 45,000، دفع 12,000 الآن" — but it used
-          to need two more dialogs on two more screens to record. Every field here was already
-          accepted by createShipmentAction; only the inputs were missing. All three stay optional:
-          a shipment with no agreed price yet is a real thing, and it still saves. */}
-      {/* items-end: the three labels are different lengths and the longest wraps on a narrow
-          dialog, which would otherwise leave its input sitting lower than the other two. */}
-      <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="shippingPrice">أجرة الشحن (ر.ي)</Label>
-          <Input id="shippingPrice" name="shippingPrice" type="number" min={0} step="0.01" dir="ltr" />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="amountPaid">المدفوع الآن (ر.ي)</Label>
-          <Input id="amountPaid" name="amountPaid" type="number" min={0} step="0.01" dir="ltr" />
-        </div>
-        <div className="space-y-1.5">
-          <Label>طريقة الدفع</Label>
-          <Select name="paymentMethod" defaultValue="CASH">
-            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="CASH">نقداً</SelectItem>
-              <SelectItem value="OTHER">أخرى</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+
 
       <div className="space-y-1.5">
         <Label htmlFor="notes">ملاحظات</Label>

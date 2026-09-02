@@ -238,6 +238,7 @@ model Customer {
   homeBranch   Branch?  @relation(fields: [homeBranchId], references: [id])
   address      String?
   notes        String?
+
   createdAt    DateTime @default(now())
 
   shipments Shipment[]

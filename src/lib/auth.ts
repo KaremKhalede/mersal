@@ -74,10 +74,6 @@ export async function login(email: string, password: string) {
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) return { error: "بيانات الدخول غير صحيحة" };
 
-  // Checked after the password, not before: answering "this company is suspended" to an unverified
-  // email would tell an outsider which companies exist and what state they are in. Once the
-  // credentials are proven correct, the real reason is the useful one — the employee needs to know
-  // to call the office, not to keep retrying a password that is actually right.
   if (user.company && user.company.status !== "ACTIVE") {
     return { error: "حساب الشركة موقوف حالياً. يرجى التواصل مع إدارة المنصة." };
   }
@@ -90,7 +86,6 @@ export async function login(email: string, password: string) {
     roleId: user.roleId,
   });
 
-  // Best-effort: a failure to stamp the login time must never block signing in.
   await prisma.user
     .update({ where: { id: user.id }, data: { lastLoginAt: new Date() } })
     .catch(() => undefined);
@@ -98,6 +93,9 @@ export async function login(email: string, password: string) {
   return { user };
 }
 
+
+
 export async function logout() {
   await destroySession();
 }
+

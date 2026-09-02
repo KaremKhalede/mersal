@@ -11,7 +11,6 @@ import { Truck, Package, CheckCircle2, ShieldCheck, XCircle, Undo2 } from "lucid
 import { requestDeliveryAction, confirmDeliveryRequestAction, markOutForDeliveryAction, markDeliveredAction, failDeliveryAction, cancelDeliveryRequestAction } from "./actions";
 import { DELIVERY_STATUS_LABELS, type DeliveryStatus } from "@/lib/enums";
 import { DeliveryProofDialog } from "@/components/shell/delivery-proof-dialog";
-import { PaymentDialog } from "@/app/app/shipments/[id]/payment-dialog";
 
 type Shipment = {
   id: string;
@@ -23,21 +22,13 @@ type Shipment = {
   deliveryRequest: { id: string; status: string; destinationAddress: string; providerRef: string | null; deliveryFee: number } | null;
 };
 
-export function DeliveryPanel({ shipment, canRecordPayment }: { shipment: Shipment; canRecordPayment: boolean }) {
+export function DeliveryPanel({ shipment }: { shipment: Shipment }) {
   const [pending, startTransition] = useTransition();
-  const [payOpen, setPayOpen] = useState(false);
   const router = useRouter();
-  const outstanding = shipment.shippingPrice != null ? Math.max(0, shipment.shippingPrice - shipment.amountPaid) : 0;
 
-  // Confirming the handover flips the request to DELIVERED and the proof dialog's branch disappears
-  // with it, so the payment dialog is owned here instead — outside every branch. Payment stays its
-  // own action: a failed one leaves the delivery recorded and the shipment in the unpaid list.
   return (
     <>
       {panel()}
-      {payOpen && (
-        <PaymentDialog shipmentId={shipment.id} amountPaid={shipment.amountPaid} shippingPrice={shipment.shippingPrice} open onOpenChange={setPayOpen} />
-      )}
     </>
   );
 
@@ -91,8 +82,6 @@ export function DeliveryPanel({ shipment, canRecordPayment }: { shipment: Shipme
               receiverName={shipment.receiverName}
               missingCartonCodes={shipment.cartons.filter((c) => c.status === "MISSING").map((c) => c.cartonCode)}
               action={(formData) => markDeliveredAction(req.id, shipment.id, formData)}
-              outstanding={outstanding}
-              onSuccess={outstanding > 0 && canRecordPayment ? () => setPayOpen(true) : undefined}
             />
           )}
           {/* Same two closes the delivery queue offers, so an employee working from the shipment

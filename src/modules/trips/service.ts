@@ -5,7 +5,7 @@ import { transitionShipmentStatusTx } from "@/modules/shipments/service";
 import { dispatchShipmentEvent } from "@/modules/notifications/service";
 import { logAudit } from "@/lib/audit";
 import { assertSameCompany } from "@/lib/tenant";
-import { assertAnyBranchMatch, assertBranchMatch } from "@/lib/branch-scope";
+import { assertAnyBranchMatch, assertBranchMatch, redactShipmentForBranch } from "@/lib/branch-scope";
 import type { ShipmentEvent } from "@/lib/enums";
 
 /** Throws if the trip doesn't belong to companyId, or — when `branchScope` is set — doesn't have
@@ -35,6 +35,23 @@ export async function assertTripInCompany(companyId: string, tripId: string, bra
   const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId }, include: { stops: true } });
   assertSameCompany({ userType: "COMPANY_USER", companyId }, trip.companyId);
   assertAnyBranchMatch(branchScope, trip.stops.map((s) => s.branchId));
+  return trip;
+}
+
+/** 
+ * Target Access Policy: Trip Administration
+ * Allowed for the ORIGIN branch ONLY (stops[0]).
+ */
+export async function assertTripAdministrativeAccess(companyId: string, tripId: string, branchScope?: string | null) {
+  const trip = await prisma.trip.findUniqueOrThrow({
+    where: { id: tripId },
+    include: { stops: { orderBy: { sequence: "asc" } } }
+  });
+  assertSameCompany({ userType: "COMPANY_USER", companyId }, trip.companyId);
+  if (branchScope) {
+    const originBranchId = trip.stops[0]?.branchId;
+    assertBranchMatch(branchScope, originBranchId);
+  }
   return trip;
 }
 
@@ -129,6 +146,14 @@ export async function autoAssignShipmentToTrip(tripId: string, shipmentId: strin
   const loadStop = trip.stops.find((s) => s.branchId === shipment.loadBranchId && s.loadingEnabled);
   if (!loadStop) throw new Error("لا توجد محطة تحميل مطابقة لفرع تحميل الشحنة في هذه الرحلة");
 
+  if (trip.status === "COMPLETED" || trip.status === "CANCELLED") {
+    throw new Error("لا يمكن إضافة شحنة لرحلة منتهية أو ملغاة");
+  }
+
+  if (loadStop.actualDeparture || loadStop.status === "DEPARTED" || loadStop.status === "DONE") {
+    throw new Error("الرحلة غادرت محطة التحميل بالفعل ولا يمكن إضافة شحنات جديدة إليها");
+  }
+
   const unloadStop = trip.stops.find((s) => s.branchId === shipment.unloadBranchId && s.unloadingEnabled && s.sequence >= loadStop.sequence);
   if (!unloadStop) throw new Error("لا توجد محطة تفريغ مطابقة لفرع تفريغ الشحنة في هذه الرحلة");
 
@@ -202,7 +227,7 @@ export async function assignTripCrew(params: {
   userId?: string;
   branchScope?: string | null;
 }) {
-  const trip = await assertTripInCompany(params.companyId, params.tripId, params.branchScope);
+  const trip = await assertTripAdministrativeAccess(params.companyId, params.tripId, params.branchScope);
   if (trip.status === "COMPLETED") throw new Error("الرحلة منتهية — لا يمكن تغيير طاقمها");
   if (trip.status === "CANCELLED") throw new Error("الرحلة ملغاة — لا يمكن تغيير طاقمها");
 
@@ -260,7 +285,7 @@ export async function assignTripCrew(params: {
  * truck — reversing it would be the lie, not keeping it.
  */
 export async function cancelTrip(companyId: string, tripId: string, userId?: string, branchScope?: string | null) {
-  await assertTripInCompany(companyId, tripId, branchScope);
+  await assertTripAdministrativeAccess(companyId, tripId, branchScope);
 
   const released = await prisma.$transaction(async (tx) => {
     const trip = await tx.trip.findUniqueOrThrow({ where: { id: tripId }, select: { status: true } });
@@ -304,9 +329,13 @@ export async function unassignShipmentFromTrip(params: {
 
   const link = await prisma.tripShipmentStop.findFirst({
     where: { id: params.linkId, tripId: params.tripId },
-    include: { trip: { select: { status: true } }, shipment: { select: { shipmentNumber: true } } },
+    include: { trip: { select: { status: true } }, shipment: { select: { shipmentNumber: true } }, loadStop: true },
   });
   if (!link) throw new Error("الشحنة ليست ضمن هذه الرحلة");
+
+  if (params.branchScope && link.loadStop.branchId !== params.branchScope) {
+    throw new Error("لا يمكنك إزالة شحنة لم يتم تحميلها من فرعك");
+  }
   if (link.trip.status === "COMPLETED") throw new Error("الرحلة منتهية — لا يمكن تعديل حمولتها");
   if (link.loadedAt) throw new Error("الشحنة محمّلة على الشاحنة — لا يمكن إزالتها من الرحلة");
 
@@ -322,7 +351,7 @@ export async function unassignShipmentFromTrip(params: {
 }
 
 export async function getTripDetail(companyId: string, tripId: string, branchId?: string | null) {
-  return prisma.trip.findFirst({
+  const trip = await prisma.trip.findFirst({
     where: { id: tripId, companyId, ...(branchId ? { stops: { some: { branchId } } } : {}) },
     include: {
       driver: true,
@@ -353,6 +382,19 @@ export async function getTripDetail(companyId: string, tripId: string, branchId?
       },
     },
   });
+
+  if (trip) {
+    trip.stops.forEach((stop) => {
+      stop.shipmentLoads.forEach((link) => {
+        link.shipment = redactShipmentForBranch(branchId, link.shipment);
+      });
+      stop.shipmentUnloads.forEach((link) => {
+        link.shipment = redactShipmentForBranch(branchId, link.shipment);
+      });
+    });
+  }
+
+  return trip;
 }
 
 /**
@@ -410,7 +452,7 @@ export async function getTripCartonsForLabels(companyId: string, tripId: string,
     orderBy: { shipment: { shipmentNumber: "asc" } },
   });
 
-  return { trip, shipments: links.map((l) => l.shipment) };
+  return { trip, shipments: links.map((l) => redactShipmentForBranch(branchScope, l.shipment)) };
 }
 
 /**
@@ -435,7 +477,7 @@ export async function getTripManifest(companyId: string, tripId: string, branchS
     include: { shipment: { include: { customer: true, unloadBranch: true } } },
     orderBy: { shipment: { shipmentNumber: "asc" } },
   });
-  const shipments = links.map((l) => l.shipment);
+  const shipments = links.map((l) => redactShipmentForBranch(branchScope, l.shipment));
   const weights = shipments.map((s) => s.weightKg);
 
   return {

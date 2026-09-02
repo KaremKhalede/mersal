@@ -4,31 +4,31 @@ import { listShipments, shipmentStatusCounts } from "@/modules/shipments/service
 import { listBranches } from "@/modules/branches/service";
 import { getBranchScope } from "@/lib/branch-scope";
 import { Card, CardContent } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableCellNum, TableHead, TableHeadNum, TableHeadSort, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeadSort, TableHeader, TableRow } from "@/components/ui/table";
 import { ShipmentStatusBadge } from "@/components/ui/status-badge";
 import { StatCard } from "@/components/ui/stat-card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
-import { PrintButton } from "@/components/labels/print-button";
 import { ExportButton } from "./export-button";
+import { InPagePrintButton } from "@/components/labels/in-page-print-button";
 import { ShipmentRowActions } from "./row-actions";
 import Link from "next/link";
 import { NewShipmentDialog } from "./new-shipment-dialog";
-import { Package, CheckCircle2, Truck, PackageCheck, AlertTriangle } from "lucide-react";
+import { Package, CheckCircle2, Truck, PackageCheck, AlertTriangle, MessageCircle } from "lucide-react";
 import type { ShipmentSortDirection } from "@/modules/shipments/service";
 import { formatDateStamp } from "@/lib/timezone";
 import { formatPhoneDisplay } from "@/lib/phone";
 import { SHIPMENT_STATUSES, SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/enums";
 import { PageHeader } from "@/components/shell/page-header";
 import { routeLabel } from "@/lib/utils";
-import { formatAmount, toMoney } from "@/lib/money";
+
 import { EmptyState, NoResults } from "@/components/feedback/empty-state";
 
 export default async function ShipmentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; branchId?: string; page?: string; unpaid?: string; dir?: string }>;
+  searchParams: Promise<{ q?: string; status?: string; branchId?: string; page?: string; dir?: string }>;
 }) {
   const user = await requireCompanyUser();
   requireCan(user, "shipments", "view");
@@ -38,19 +38,17 @@ export default async function ShipmentsPage({
   // theirs to any one branch.
   const ownScope = getBranchScope(user);
   const effectiveBranchId = ownScope ?? (sp.branchId || undefined);
-  // Set by the dashboard's "المتبقي على العملاء" figure, which links straight here.
-  const unpaid = sp.unpaid === "1";
   // Anything other than the one alternative falls back to the list's long-standing default rather
   // than erroring — a hand-edited URL should reorder nothing, not break the page.
   const dir: ShipmentSortDirection = sp.dir === "asc" ? "asc" : "desc";
 
   const [{ items, total, pageCount }, branches, counts] = await Promise.all([
-    listShipments({ companyId: user.companyId!, search: sp.q, status: sp.status as ShipmentStatus | undefined, page, branchId: effectiveBranchId, unpaid, dir }),
+    listShipments({ companyId: user.companyId!, search: sp.q, status: sp.status as ShipmentStatus | undefined, page, branchId: effectiveBranchId, dir }),
     listBranches(user.companyId!),
     shipmentStatusCounts(user.companyId!, effectiveBranchId),
   ]);
 
-  const qs = `${sp.q ? `&q=${sp.q}` : ""}${sp.status ? `&status=${sp.status}` : ""}${sp.branchId ? `&branchId=${sp.branchId}` : ""}${unpaid ? "&unpaid=1" : ""}${dir === "asc" ? "&dir=asc" : ""}`;
+  const qs = `${sp.q ? `&q=${sp.q}` : ""}${sp.status ? `&status=${sp.status}` : ""}${sp.branchId ? `&branchId=${sp.branchId}` : ""}${dir === "asc" ? "&dir=asc" : ""}`;
   // Flipping the order returns to page 1: staying on page 7 of the opposite order lands the user
   // in the middle of a list they have not seen the start of.
   const sortHref = `/app/shipments?page=1${qs.replace(/&dir=asc/, "")}${dir === "asc" ? "" : "&dir=asc"}`;
@@ -62,8 +60,8 @@ export default async function ShipmentsPage({
         count={total}
         actions={
           <>
-            <ExportButton status={sp.status as ShipmentStatus | undefined} search={sp.q} branchId={effectiveBranchId} unpaid={unpaid} />
-            <PrintButton />
+            <ExportButton status={sp.status as ShipmentStatus | undefined} search={sp.q} branchId={effectiveBranchId} />
+            <InPagePrintButton status={sp.status as ShipmentStatus | undefined} search={sp.q} branchId={effectiveBranchId} />
             <NewShipmentDialog branches={branches} />
           </>
         }
@@ -104,19 +102,13 @@ export default async function ShipmentsPage({
             <option key={s} value={s}>{SHIPMENT_STATUS_LABELS[s]}</option>
           ))}
         </select>
-        {/* A plain checkbox, submitted by the same button as the other two filters — an unchecked
-            box sends nothing, so clearing it is what drops `unpaid` from the URL. */}
-        <label className="flex items-center gap-1.5 text-sm">
-          <input type="checkbox" name="unpaid" value="1" defaultChecked={unpaid} className="h-4 w-4 accent-primary" />
-          غير مدفوعة
-        </label>
         <Button type="submit" variant="secondary" size="sm">تصفية</Button>
       </form>
 
       <Card>
         <CardContent className="p-0">
           {items.length === 0 ? (
-            sp.q || sp.status || sp.branchId || unpaid ? (
+            sp.q || sp.status || sp.branchId ? (
               <NoResults resetHref="/app/shipments" />
             ) : (
               <EmptyState
@@ -136,7 +128,7 @@ export default async function ShipmentsPage({
                   columns still do not fit a 736px phone-width page, which is what it was measuring.)
                   A card puts the number and the status on the same first line, and the card itself
                   is the action. */}
-              <ul className="divide-y lg:hidden">
+              <ul className="divide-y lg:hidden print:hidden">
                 {items.map((s) => (
                   <li key={s.id}>
                     <Link href={`/app/shipments/${s.id}`} className="block space-y-1 p-3 hover:bg-accent">
@@ -148,31 +140,22 @@ export default async function ShipmentsPage({
                       <p className="text-xs text-muted-foreground">
                         {routeLabel(s.loadBranch.name, s.unloadBranch.name)} · {s.arrivedCartons}/{s.totalCartons} كرتون
                       </p>
-                      {/* Only when something is actually owed: a settled shipment printing
-                          "المتبقي: 0" on every card is noise, and a shipment with no agreed price
-                          has no balance to state. */}
-                      {s.shippingPrice != null && toMoney(s.shippingPrice) > toMoney(s.amountPaid) && (
-                        <p className="text-xs font-medium text-warning">
-                          المتبقي: {formatAmount(toMoney(s.shippingPrice) - toMoney(s.amountPaid))} ر.ي
-                        </p>
-                      )}
                     </Link>
                   </li>
                 ))}
               </ul>
 
-              <div className="hidden lg:block">
+              <div className="hidden lg:block print:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>رقم الشحنة</TableHead>
                       <TableHead>العميل</TableHead>
                       <TableHead>من ← إلى</TableHead>
-                      <TableHeadNum>الكراتين</TableHeadNum>
+                      <TableHead className="text-center">الكراتين</TableHead>
                       <TableHead>الحالة</TableHead>
-                      <TableHeadNum>المتبقي (ر.ي)</TableHeadNum>
                       <TableHeadSort href={sortHref} active direction={dir}>تاريخ الإنشاء</TableHeadSort>
-                      <TableHead className="print:hidden"></TableHead>
+                      <TableHead className="print:hidden text-center w-16">إجراء</TableHead>
                     </TableRow>
                   </TableHeader>
                   {/*
@@ -198,24 +181,30 @@ export default async function ShipmentsPage({
                           </Link>
                         </TableCell>
                         <TableCell>
-                          <p>{s.customer.name}</p>
-                          <p className="text-xs text-muted-foreground" dir="ltr">{formatPhoneDisplay(s.customer.phone)}</p>
+                          <div className="flex flex-col items-start space-y-1">
+                            <p>{s.customer.name}</p>
+                            <div className="flex items-center gap-2">
+                              <span className="inline-block text-xs text-muted-foreground" dir="ltr">
+                                {formatPhoneDisplay(s.customer.phone)}
+                              </span>
+                              {s.customer.phone && (
+                                <a
+                                  href={`https://wa.me/${s.customer.phone.replace(/\D/g, "")}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="relative z-10 rounded-full bg-green-50 p-1 text-green-600 transition-colors hover:bg-green-100 dark:bg-green-500/10 dark:hover:bg-green-500/20"
+                                  title="مراسلة عبر واتساب"
+                                  aria-label="مراسلة عبر واتساب"
+                                >
+                                  <MessageCircle className="h-3.5 w-3.5" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
                         </TableCell>
                         <TableCell className="text-muted-foreground text-sm">{routeLabel(s.loadBranch.name, s.unloadBranch.name)}</TableCell>
-                        <TableCellNum dir="ltr">{s.arrivedCartons}/{s.totalCartons}</TableCellNum>
+                        <TableCell className="text-center" dir="ltr">{s.arrivedCartons}/{s.totalCartons}</TableCell>
                         <TableCell><ShipmentStatusBadge status={s.status} /></TableCell>
-                        {/* "—" for a shipment whose price has not been agreed yet — distinct from
-                            a settled "0", and the same shipments the unpaid filter leaves out. */}
-                        <TableCellNum dir="ltr">
-                          {s.shippingPrice == null ? (
-                            <span className="text-muted-foreground">—</span>
-                          ) : (
-                            (() => {
-                              const remaining = Math.max(0, toMoney(s.shippingPrice) - toMoney(s.amountPaid));
-                              return <span className={remaining > 0 ? "font-medium text-warning" : "text-muted-foreground"}>{formatAmount(remaining)}</span>;
-                            })()
-                          )}
-                        </TableCellNum>
                         <TableCell className="text-muted-foreground text-xs">
                           {formatDateStamp(s.createdAt)}
                         </TableCell>

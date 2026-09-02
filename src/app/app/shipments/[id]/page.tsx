@@ -18,8 +18,7 @@ import { formatBusinessDateTime, formatDate, formatDateStamp } from "@/lib/timez
 import { formatPhoneDisplay } from "@/lib/phone";
 import { EXCEPTION_TYPE_LABELS, SHIPMENT_STATUS_LABELS, DELIVERY_CHANNEL_LABELS, type ExceptionType, type ShipmentStatus, type DeliveryChannel } from "@/lib/enums";
 import { PageHeader } from "@/components/shell/page-header";
-import { formatYER } from "@/lib/money";
-import { cn, routeLabel } from "@/lib/utils";
+import { toMoneyOrNull } from "@/lib/money";import { cn, routeLabel } from "@/lib/utils";
 
 export default async function ShipmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireCompanyUser();
@@ -35,12 +34,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
   // timeline is already where dated occurrences live.
   const lateArrivals = shipment.trackingEvents.filter((e) => e.eventType === "CARTON_ARRIVED_LATE");
   const reporter = isException ? await getExceptionReporter(shipment.id) : null;
-  // Derived on the server from the status recorded when the exception was raised, so the buttons
-  // can only ever offer moves resolveException will accept.
   const recoveryOptions = isException ? await getExceptionRecoveryOptions(shipment.id) : [];
-  // The permission recordPaymentAction itself enforces — checked here only to decide whether the
-  // handover flow offers to collect, never as the gate. The action re-checks it either way.
-  const canRecordPayment = can(user, "shipments", "edit");
 
   return (
     <div className="space-y-4">
@@ -54,7 +48,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
           isException ? (
             <ResolveExceptionButton shipmentId={shipment.id} options={recoveryOptions} />
           ) : (
-            <ShipmentActions shipment={shipment} canRecordPayment={canRecordPayment} />
+            <ShipmentActions shipment={shipment} />
           )
         }
       />
@@ -71,19 +65,10 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
         figure with an icon tile and is far too loud for a per-record fact.
       */}
       <Card>
-        <CardContent className="grid grid-cols-3 divide-x divide-x-reverse text-center">
+        <CardContent className="grid grid-cols-2 divide-x divide-x-reverse text-center">
           <Fact label="الموقع الحالي" value={shipment.currentBranch?.name ?? "في الطريق"} />
           {/* Same numerator/denominator the list and the cartons tab use, so the three agree. */}
           <Fact label="الكراتين" value={`${shipment.arrivedCartons} / ${shipment.totalCartons}`} ltr />
-          <Fact
-            label="المتبقي على العميل"
-            // "—" not "0" when no price has been agreed yet — the same distinction the list makes,
-            // and the reason those shipments never match the unpaid filter.
-            value={shipment.shippingPrice != null ? formatYER(Math.max(0, shipment.shippingPrice - shipment.amountPaid)) : "—"}
-            // Warning only when something is actually owed. A settled shipment stating a calm "0"
-            // is information; a settled shipment stating an orange "0" is a false alarm.
-            tone={shipment.shippingPrice != null && shipment.shippingPrice - shipment.amountPaid > 0 ? "warning" : undefined}
-          />
         </CardContent>
       </Card>
 
@@ -192,7 +177,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
               </TabsContent>
 
               <TabsContent value="delivery" className="p-4">
-                <DeliveryPanel shipment={shipment} canRecordPayment={canRecordPayment} />
+                <DeliveryPanel shipment={shipment} />
               </TabsContent>
             </Tabs>
           </CardContent>
@@ -228,25 +213,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
                 <InfoRow label="نوع البضاعة" value={shipment.goodsType ?? "—"} />
                 <InfoRow label="الوزن" value={shipment.weightKg ? `${shipment.weightKg} كجم` : "—"} />
               </Section>
-              <Separator />
-              <Section title="المالية">
-                {/* toLocaleString, like every other money figure in the app — a bare template literal
-                    printed "12500 ر.ي" next to the billing page's "12,500 ر.ي". */}
-                <InfoRow label="أجرة الشحن" value={shipment.shippingPrice != null ? `${formatYER(shipment.shippingPrice)}` : "—"} />
-                <InfoRow label="المبلغ المدفوع" value={`${formatYER(shipment.amountPaid)}`} />
-                {/* The one figure in this card that is a running obligation rather than a record of
-                    what happened, so it is the one that carries colour — the same warning tone the
-                    list column and the strip above already use for it. */}
-                <InfoRow
-                  label="المتبقي"
-                  tone={shipment.shippingPrice != null && shipment.shippingPrice - shipment.amountPaid > 0 ? "warning" : undefined}
-                  value={
-                    shipment.shippingPrice != null
-                      ? `${formatYER(Math.max(0, shipment.shippingPrice - shipment.amountPaid))}`
-                      : "—"
-                  }
-                />
-              </Section>
+
               {/* The dispute record. Shown only once a handover actually happened — an empty
                   "delivered to: —" block on every in-transit shipment would be noise. */}
               {shipment.deliveredAt && (

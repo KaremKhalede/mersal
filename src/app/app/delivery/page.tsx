@@ -15,7 +15,6 @@ import { DELIVERY_STATUSES, DELIVERY_STATUS_LABELS, type DeliveryStatus } from "
 import { PageHeader } from "@/components/shell/page-header";
 import { EmptyState, NoResults, TableEmpty } from "@/components/feedback/empty-state";
 import { formatPhoneDisplay } from "@/lib/phone";
-import { toMoney, toMoneyOrNull } from "@/lib/money";
 
 /**
  * The delivery queue, given the same anatomy as every other list in the product.
@@ -44,7 +43,6 @@ export default async function DeliveryRequestsPage({
   const sp = await searchParams;
   const all = await listDeliveryRequests(user.companyId!, getBranchScope(user));
   const canAct = can(user, "shipments", "updateStatus");
-  const canRecordPayment = can(user, "shipments", "edit");
 
   const q = (sp.q ?? "").trim().toLowerCase();
   const requests = all.filter((r) => {
@@ -136,9 +134,6 @@ export default async function DeliveryRequestsPage({
                         status={r.status}
                         receiverName={r.shipment.receiverName}
                         missingCartonCodes={r.shipment.cartons.filter((c) => c.status === "MISSING").map((c) => c.cartonCode)}
-                        amountPaid={toMoney(r.shipment.amountPaid)}
-                        shippingPrice={toMoneyOrNull(r.shipment.shippingPrice)}
-                        canRecordPayment={canRecordPayment}
                       />
                     </TableCell>
                   )}

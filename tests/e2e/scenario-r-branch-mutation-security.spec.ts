@@ -8,7 +8,7 @@ import {
   login,
   cleanupTenant,
 } from "./helpers";
-import { assertOwnsShipment } from "../../src/modules/shipments/service";
+import { assertOwnsShipmentVisibility } from "../../src/modules/shipments/service";
 import { assertTripInCompany, assertStopInCompany } from "../../src/modules/trips/service";
 import { getOrCreateCustomsCase, updateCustomsStatus } from "../../src/modules/customs/service";
 import { saveDocument } from "../../src/modules/documents/service";
@@ -34,13 +34,13 @@ test.describe("Scenario R — branch-scoped mutation authorization (bypasses the
     const employeeAtA = { userType: "COMPANY_USER", companyId: tenant.company.id, role: { name: "موظف فرع" }, branchId: branchA.id };
 
     // Negative: shipment never touches branch A.
-    await expect(assertOwnsShipment(employeeAtA, shipmentAtB.id)).rejects.toThrow(/FORBIDDEN/);
+    await expect(assertOwnsShipmentVisibility(employeeAtA, shipmentAtB.id)).rejects.toThrow(/FORBIDDEN/);
     // Positive control: same employee, same shipment they SHOULD be able to reach.
-    await expect(assertOwnsShipment(employeeAtA, shipmentAtA.id)).resolves.toBeTruthy();
+    await expect(assertOwnsShipmentVisibility(employeeAtA, shipmentAtA.id)).resolves.toBeTruthy();
 
     // Company Admin bypass: unaffected regardless of branch.
     const admin = { userType: "COMPANY_USER", companyId: tenant.company.id, role: { name: "مدير الشركة" }, branchId: null };
-    await expect(assertOwnsShipment(admin, shipmentAtB.id)).resolves.toBeTruthy();
+    await expect(assertOwnsShipmentVisibility(admin, shipmentAtB.id)).resolves.toBeTruthy();
 
     await cleanupTenant(tenant.company.id);
   });

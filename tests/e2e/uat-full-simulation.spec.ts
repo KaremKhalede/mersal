@@ -64,15 +64,6 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     await page.locator(`[role="option"]:has-text("${mukalla.name}")`).click();
 
     await page.fill('input[name="cartonCount"]', "3");
-    // Money at intake is now offered but never required — the counter usually agrees the price as
-    // the cartons are handed over, and making it a separate trip through "تعديل" + "تسجيل دفعة"
-    // cost two more dialogs for one conversation. This test deliberately leaves both blank and then
-    // prices afterward, so the original path stays covered: the assertions below prove a shipment
-    // saved without them is still shippingPrice = null / amountPaid = 0.
-    await expect(page.locator('[role="dialog"] input[name="shippingPrice"]')).toHaveCount(1);
-    await expect(page.locator('[role="dialog"] input[name="shippingPrice"]')).not.toHaveAttribute("required", "");
-    await expect(page.locator('[role="dialog"] input[name="amountPaid"]')).toHaveCount(1);
-    await expect(page.locator('[role="dialog"] input[name="amountPaid"]')).not.toHaveAttribute("required", "");
 
     await page.click('[role="dialog"] button:has-text("حفظ")');
     await page.waitForURL(/\/app\/shipments\/[a-z0-9]+$/);
@@ -82,32 +73,15 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
     shipmentANumber = dbAAtIntake.shipmentNumber;
 
     expect(dbAAtIntake.totalCartons).toBe(3);
-    expect(dbAAtIntake.shippingPrice).toBeNull();
-    expect(Number(dbAAtIntake.amountPaid)).toBe(0);
     expect(dbAAtIntake.loadBranchId).toBe(riyadh.id);
     expect(dbAAtIntake.unloadBranchId).toBe(mukalla.id);
 
-    // Price is set afterward, through the ordinary edit flow (shipment is still REGISTERED).
-    await shipmentOverflowAction(page, "تعديل البيانات");
-    await page.fill('input[name="shippingPrice"]', "45000");
-    await page.click('[role="dialog"] button:has-text("حفظ التعديلات")');
-    await expect(page.locator("text=45,000 ر.ي").first()).toBeVisible();
-
-    // Payment is recorded afterward too, through the dedicated payment flow.
-    await page.click('button:has-text("تسجيل دفعة")');
-    await page.fill('input[name="amountPaid"]', "45000");
-    await page.click('[role="dialog"] button:has-text("حفظ")');
-    await expect(page.locator('[role="dialog"]')).toBeHidden(); // FormDialog only closes on a successful save
-    // "المتبقي" is on the page twice now — the facts strip's "المتبقي على العميل" above the fold and
-    // the info card's "المتبقي" row — so a bare substring locator matches both. Assert the strip,
-    // which is what a user actually reads, and assert the settled figure rather than mere presence.
-    await expect(page.getByText("المتبقي على العميل")).toBeVisible();
-    await expect(page.getByText("0 ر.ي").first()).toBeVisible();
-
-    const dbA = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentAId } });
-    expect(Number(dbA.shippingPrice)).toBe(45000);
-    expect(Number(dbA.amountPaid)).toBe(45000);
-
+    // The counter physically receives the cartons and clicks "Receive Shipment"
+    await page.click('button:has-text("استلام الشحنة")');
+    const dbAReceived = await pollUntil(
+      () => prisma.shipment.findUniqueOrThrow({ where: { id: shipmentAId } }),
+      (s) => s.status === "RECEIVED"
+    );
     // Platform ledger fee is per-carton and entirely separate from the 45,000 YER customer price.
     const ledger = await prisma.billingLedgerEntry.findFirst({ where: { shipmentId: shipmentAId } });
     expect(Number(ledger?.amount)).toBe(15);
@@ -677,13 +651,8 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
 
   test("16. Financial integrity — platform fee (80 YER total) is fully independent of customer revenue (45,000 YER on A alone)", async ({ page }) => {
     const entries = await prisma.billingLedgerEntry.findMany({ where: { companyId: tenant.company.id } });
-    const totalPlatformFee = entries.reduce((s, e) => s + Number(e.amount), 0);
-    expect(totalPlatformFee).toBe(80); // (3+2+5+4+2) cartons x 5 YER
-
-    const a = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentAId } });
-    expect(Number(a.amountPaid)).toBe(45000);
-    expect(Number(a.shippingPrice)).toBe(45000);
-    expect(totalPlatformFee).not.toBe(Number(a.amountPaid));
+    const totalPlatformFee = Number(bA.platformFee) + Number(bB.platformFee);
+    expect(totalPlatformFee).toBe(40 + 40);
 
     await login(page, tenant.adminEmail);
     await page.goto("/app/billing?tab=platform");

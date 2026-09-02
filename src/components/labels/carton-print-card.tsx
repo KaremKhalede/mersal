@@ -149,31 +149,31 @@ export function CartonPrintCard({
 
         <div className="border-t border-border" />
 
-        <div className="py-3 text-center text-[13px] font-bold text-foreground">
-          {loadBranchName} <span className="text-muted-foreground">←</span> {unloadBranchName}
+        <div className="py-4 text-center text-[17px] font-black text-foreground">
+          {loadBranchName} <span className="text-muted-foreground mx-1">←</span> <span className="text-[19px]">{unloadBranchName}</span>
         </div>
 
         <div className="border-t border-border" />
 
-        <dl className="space-y-1.5 py-3 text-[12px]">
+        <dl className="space-y-2 py-4 text-[14px]">
           <div className="flex w-full items-center justify-between">
             <dt className="flex items-center gap-1.5 text-muted-foreground">
-              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="8" r="3.2" />
                 <path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5" />
               </svg>
               المستلم :
             </dt>
-            <dd className="font-bold text-foreground">{receiverName}</dd>
+            <dd className="text-[18px] font-black text-foreground">{receiverName}</dd>
           </div>
           <div className="flex w-full items-center justify-between">
             <dt className="flex items-center gap-1.5 text-muted-foreground">
-              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M6 3h4l2 5-2.5 1.5a12 12 0 0 0 5 5L16 12l5 2v4a2 2 0 0 1-2.2 2A17 17 0 0 1 4 5.2 2 2 0 0 1 6 3Z" />
               </svg>
               الجوال :
             </dt>
-            <dd dir="ltr" className="font-mono font-bold text-foreground">
+            <dd dir="ltr" className="font-mono text-[17px] font-bold text-foreground">
               {receiverPhone}
             </dd>
           </div>
@@ -202,10 +202,10 @@ export function CartonPrintCard({
                 dangerouslySetInnerHTML={{ __html: qrSvg }}
               />
               <div className="text-left">
-                <span className="mb-1.5 inline-block rounded bg-foreground px-3 py-1 text-[11px] font-semibold text-background">
+                <span className="mb-1 inline-block text-[11px] font-semibold text-muted-foreground">
                   كود الكرتون
                 </span>
-                <p className="font-mono text-[13px] font-bold text-foreground" dir="ltr">
+                <p className="font-mono text-[14px] font-bold text-foreground" dir="ltr">
                   {cartonCode}
                 </p>
               </div>

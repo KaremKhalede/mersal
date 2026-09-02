@@ -19,6 +19,8 @@ export async function proxy(req: NextRequest) {
   // /reset/<token> is public by necessity: the whole reason someone opens it is that they cannot
   // sign in. The token in the URL is the only credential, re-checked server-side on every submit.
   const isPublic =
+    pathname === "/" ||
+    pathname.startsWith("/register") ||
     pathname.startsWith("/track") ||
     // The customer's own tracking link. Short because its whole life is inside a WhatsApp message;
     // public because the token in it IS the credential.
@@ -30,14 +32,13 @@ export async function proxy(req: NextRequest) {
   const session = await readSession(req);
 
   if (pathname === "/") {
-    // An anonymous visitor to the bare domain gets the public shipment lookup, not the staff login
-    // screen. Customers outnumber employees by orders of magnitude and are the ones with no other
-    // way in once their WhatsApp link is gone; employees bookmark /login, and /track links to it.
-    // Signed-in users are unaffected — every branch below still routes them to their own app.
-    if (!session) return NextResponse.redirect(new URL("/track", req.url));
-    if (session.userType === "PLATFORM_ADMIN") return NextResponse.redirect(new URL("/platform", req.url));
-    if (session.userType === "DRIVER") return NextResponse.redirect(new URL("/driver", req.url));
-    return NextResponse.redirect(new URL("/app", req.url));
+    // If the user is signed in, redirect them to their respective dashboard.
+    // Otherwise, let them see the public Landing Page.
+    if (session) {
+      if (session.userType === "PLATFORM_ADMIN") return NextResponse.redirect(new URL("/platform", req.url));
+      if (session.userType === "DRIVER") return NextResponse.redirect(new URL("/driver", req.url));
+      return NextResponse.redirect(new URL("/app", req.url));
+    }
   }
 
   // Public, unauthenticated surfaces that a script could otherwise hammer freely: credential

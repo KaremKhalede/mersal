@@ -4,15 +4,14 @@ import { revalidatePath } from "next/cache";
 import { requireCompanyUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getBranchScope, assertBranchMatch } from "@/lib/branch-scope";
-import { createShipment, updateShipmentStatus, markReadyForPickup, confirmBranchPickup, recordPayment, raiseException, resolveException, assertOwnsShipment, assertOwnsShipmentExact, updateShipmentDetails, cancelDraftShipment, listShipmentsForExport, confirmLateCartons } from "@/modules/shipments/service";
+import { createShipment, updateShipmentStatus, markReadyForPickup, confirmBranchPickup, raiseException, resolveException, assertOwnsShipmentPhysical, updateShipmentDetails, cancelDraftShipment, listShipmentsForExport, confirmLateCartons } from "@/modules/shipments/service";
 import { confirmRemainingArrived } from "@/modules/trips/service";
 import { findOrCreateCustomer } from "@/modules/customers/service";
 import { assertCan } from "@/lib/rbac";
-import { SHIPMENT_STATUS_LABELS, type ShipmentStatus, type ExceptionType, type PaymentMethod } from "@/lib/enums";
+import { SHIPMENT_STATUS_LABELS, type ShipmentStatus, type ExceptionType } from "@/lib/enums";
 import { actionResult } from "@/lib/action-result";
 import { phoneError } from "@/lib/phone";
 import { toCsv } from "@/lib/csv";
-import { formatAmount, toMoney } from "@/lib/money";
 
 export async function createShipmentAction(formData: FormData) {
   const user = await requireCompanyUser();
@@ -34,21 +33,7 @@ export async function createShipmentAction(formData: FormData) {
   const cartonCount = Number(formData.get("cartonCount"));
   if (!cartonCount || cartonCount < 1) return { error: "عدد الكراتين يجب أن يكون 1 على الأقل" };
 
-  // Both money fields are optional — a shipment registered before the price is agreed is a real
-  // case and must still save. What is checked is the same thing recordPaymentAction checks, in the
-  // same words, so the two ways of entering money into a shipment agree: a value that is present
-  // must be a finite, non-negative number.
-  //
-  // Deliberately NOT checked: amountPaid > shippingPrice. recordPaymentAction allows it, the
-  // shipment page already clamps the remainder with Math.max(0, ...), and blocking it here alone
-  // would mean the same figure is accepted through one door and refused through the other.
-  const money: [string, string][] = [["shippingPrice", "أجرة الشحن"], ["amountPaid", "المبلغ المدفوع"]];
-  for (const [field, label] of money) {
-    const raw = formData.get(field);
-    if (!raw) continue;
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value < 0) return { error: `${label} غير صالح` };
-  }
+
 
   const loadBranchId = String(formData.get("loadBranchId") || "");
   const unloadBranchId = String(formData.get("unloadBranchId") || "");
@@ -92,9 +77,6 @@ export async function createShipmentAction(formData: FormData) {
     weightKg: formData.get("weightKg") ? Number(formData.get("weightKg")) : undefined,
     notes: String(formData.get("notes") || ""),
     createdById: user.id,
-    shippingPrice: formData.get("shippingPrice") ? Number(formData.get("shippingPrice")) : undefined,
-    amountPaid: formData.get("amountPaid") ? Number(formData.get("amountPaid")) : undefined,
-    paymentMethod: (String(formData.get("paymentMethod") || "CASH")) as PaymentMethod,
   });
 
   revalidatePath("/app/shipments");
@@ -104,7 +86,7 @@ export async function createShipmentAction(formData: FormData) {
 export async function receiveShipmentAction(shipmentId: string) {
   const user = await requireCompanyUser();
   assertCan(user, "shipments", "updateStatus");
-  await assertOwnsShipment(user, shipmentId);
+  await assertOwnsShipmentPhysical(user, shipmentId);
   await updateShipmentStatus(shipmentId, "RECEIVED", { userId: user.id });
   revalidatePath("/app/shipments");
   revalidatePath(`/app/shipments/${shipmentId}`);
@@ -127,7 +109,7 @@ export async function receiveShipmentAction(shipmentId: string) {
 export async function markReadyForPickupAction(shipmentId: string) {
   const user = await requireCompanyUser();
   assertCan(user, "shipments", "updateStatus");
-  await assertOwnsShipment(user, shipmentId);
+  await assertOwnsShipmentPhysical(user, shipmentId);
   await markReadyForPickup(shipmentId, user.id);
   revalidatePath(`/app/shipments/${shipmentId}`);
 }
@@ -145,7 +127,7 @@ export async function confirmBranchPickupAction(shipmentId: string, formData: Fo
   return actionResult(async () => {
     const user = await requireCompanyUser();
     assertCan(user, "shipments", "updateStatus");
-    await assertOwnsShipment(user, shipmentId);
+    await assertOwnsShipmentPhysical(user, shipmentId);
     await confirmBranchPickup(
       shipmentId,
       {
@@ -163,7 +145,7 @@ export async function confirmBranchPickupAction(shipmentId: string, formData: Fo
 export async function confirmRemainingArrivedAction(shipmentId: string) {
   const user = await requireCompanyUser();
   assertCan(user, "shipments", "updateStatus");
-  await assertOwnsShipment(user, shipmentId);
+  await assertOwnsShipmentPhysical(user, shipmentId);
   await confirmRemainingArrived(shipmentId, user.id);
   revalidatePath(`/app/shipments/${shipmentId}`);
 }
@@ -188,7 +170,6 @@ export async function updateShipmentAction(formData: FormData) {
       goodsType: String(formData.get("goodsType") || "") || undefined,
       weightKg: formData.get("weightKg") ? Number(formData.get("weightKg")) : undefined,
       notes: String(formData.get("notes") || "") || undefined,
-      shippingPrice: formData.get("shippingPrice") ? Number(formData.get("shippingPrice")) : undefined,
     }, { userId: user.id, branchScope: getBranchScope(user) });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "تعذّر تعديل الشحنة" };
@@ -206,35 +187,12 @@ export async function cancelShipmentAction(shipmentId: string) {
   revalidatePath("/app/shipments");
 }
 
-export async function recordPaymentAction(formData: FormData) {
-  const user = await requireCompanyUser();
-  assertCan(user, "shipments", "edit");
-  const shipmentId = String(formData.get("shipmentId"));
-  try {
-    // Exact branch match, not any-touch — same reasoning as updateShipmentAction above. Caught and
-    // returned as data (not left to throw) so the reason reaches the client in production too —
-    // Next.js redacts uncaught Server Action error messages to a bare digest on production builds,
-    // same as any other server-side render error, so an unguarded throw here would only ever surface
-    // a generic "an error occurred" toast once deployed, not the real "outside your branch" reason.
-    await assertOwnsShipmentExact(user, shipmentId);
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "تعذّر تسجيل الدفعة" };
-  }
-  const amountPaid = Number(formData.get("amountPaid"));
-  if (!Number.isFinite(amountPaid) || amountPaid < 0) return { error: "مبلغ غير صالح" };
-  await recordPayment(shipmentId, {
-    amountPaid,
-    paymentMethod: (String(formData.get("paymentMethod") || "CASH")) as PaymentMethod,
-    userId: user.id,
-  });
-  revalidatePath(`/app/shipments/${shipmentId}`);
-}
 
 export async function raiseExceptionAction(formData: FormData) {
   const user = await requireCompanyUser();
   assertCan(user, "shipments", "updateStatus");
   const shipmentId = String(formData.get("shipmentId"));
-  await assertOwnsShipment(user, shipmentId);
+  await assertOwnsShipmentPhysical(user, shipmentId);
   await raiseException(shipmentId, String(formData.get("exceptionType")) as ExceptionType, String(formData.get("note") || "") || undefined, user.id);
   revalidatePath(`/app/shipments/${shipmentId}`);
   revalidatePath("/app/exceptions");
@@ -243,7 +201,7 @@ export async function raiseExceptionAction(formData: FormData) {
 export async function resolveExceptionAction(shipmentId: string, toStatus?: ShipmentStatus) {
   const user = await requireCompanyUser();
   assertCan(user, "shipments", "updateStatus");
-  await assertOwnsShipment(user, shipmentId);
+  await assertOwnsShipmentPhysical(user, shipmentId);
   await resolveException(shipmentId, user.id, toStatus);
   revalidatePath(`/app/shipments/${shipmentId}`);
   revalidatePath("/app/exceptions");
@@ -252,7 +210,7 @@ export async function resolveExceptionAction(shipmentId: string, toStatus?: Ship
 /** CSV text for the "تصدير" button — same filters as whatever's currently on screen, but every
  * matching row, not just the current page. The caller (export-button.tsx) prepends a UTF-8 BOM
  * before download, which Excel needs to render Arabic text correctly instead of mojibake. */
-export async function exportShipmentsCsvAction(params: { status?: ShipmentStatus; search?: string; branchId?: string | null; unpaid?: boolean }) {
+export async function exportShipmentsCsvAction(params: { status?: ShipmentStatus; search?: string; branchId?: string | null }) {
   const user = await requireCompanyUser();
   assertCan(user, "shipments", "view");
   const scope = getBranchScope(user);
@@ -261,13 +219,10 @@ export async function exportShipmentsCsvAction(params: { status?: ShipmentStatus
     status: params.status,
     search: params.search,
     branchId: scope ?? params.branchId,
-    unpaid: params.unpaid,
   });
 
-  // "المتبقي" is a column here for the same reason it is one on screen: the export must be the
-  // filtered list, not a different view of it. Blank — not "0" — when no price was agreed yet,
-  // which is also why those shipments never match the unpaid filter.
-  const header = ["رقم الشحنة", "العميل", "من", "إلى", "الكراتين الواصلة", "إجمالي الكراتين", "الحالة", "المتبقي", "تاريخ الإنشاء"];
+  // Blank — not "0" — when no price was agreed yet.
+  const header = ["رقم الشحنة", "العميل", "من", "إلى", "الكراتين الواصلة", "إجمالي الكراتين", "الحالة", "تاريخ الإنشاء"];
   const rows = items.map((s) => [
     s.shipmentNumber,
     s.customer.name,
@@ -276,10 +231,37 @@ export async function exportShipmentsCsvAction(params: { status?: ShipmentStatus
     String(s.arrivedCartons),
     String(s.totalCartons),
     SHIPMENT_STATUS_LABELS[s.status as ShipmentStatus] ?? s.status,
-    s.shippingPrice == null ? "" : formatAmount(Math.max(0, toMoney(s.shippingPrice) - toMoney(s.amountPaid))),
     s.createdAt.toISOString().slice(0, 10),
   ]);
   return toCsv(header, rows);
+}
+
+export async function getShipmentsForPrintAction(params: { status?: ShipmentStatus; search?: string; branchId?: string | null }) {
+  const user = await requireCompanyUser();
+  assertCan(user, "shipments", "view");
+  const scope = getBranchScope(user);
+  const items = await listShipmentsForExport({
+    companyId: user.companyId!,
+    status: params.status,
+    search: params.search,
+    branchId: scope ?? params.branchId,
+  });
+
+  return {
+    companyName: user.company!.name,
+    items: items.map(s => ({
+      id: s.id,
+      shipmentNumber: s.shipmentNumber,
+      customerName: s.customer.name,
+      customerPhone: s.customer.phone,
+      loadBranchName: s.loadBranch.name,
+      unloadBranchName: s.unloadBranch.name,
+      arrivedCartons: s.arrivedCartons,
+      totalCartons: s.totalCartons,
+      status: s.status as ShipmentStatus,
+      createdAt: s.createdAt.toISOString(),
+    }))
+  };
 }
 
 /**

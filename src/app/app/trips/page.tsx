@@ -98,6 +98,8 @@ export default async function TripsPage({
                       <p className="text-xs text-muted-foreground">
                         {t.shipmentCount > 0 ? `${t.shipmentCount} شحنة / ${t.cartonCount} كرتون` : "لا حمولة بعد"}
                         {t.driver ? ` · ${t.driver.name}` : ""}
+                        {t.vehicle ? ` · ` : ""}
+                        {t.vehicle && <span dir="ltr">{t.vehicle.plateNumber}</span>}
                       </p>
                       {/* A trip nobody is driving cannot be executed at all — the driver app
                           resolves its trip by Trip.driverId — so it is stated, not left to be
@@ -116,6 +118,7 @@ export default async function TripsPage({
                   <TableHeader>
                     <TableRow>
                       <TableHead>رقم الرحلة</TableHead>
+                      <TableHead>المركبة</TableHead>
                       <TableHead>المسار</TableHead>
                       <TableHead>الحمولة</TableHead>
                       <TableHead>السائق</TableHead>
@@ -136,7 +139,9 @@ export default async function TripsPage({
                           >
                             {t.tripNumber}
                           </Link>
-                          {t.vehicle && <p className="text-xs text-muted-foreground" dir="ltr">{t.vehicle.plateNumber}</p>}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {t.vehicle ? <span dir="ltr">{t.vehicle.plateNumber}</span> : "—"}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           <div className="flex items-center gap-1 flex-wrap">

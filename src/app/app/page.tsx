@@ -1,7 +1,6 @@
 import { requireCompanyUser } from "@/lib/auth";
 import { companyDashboard } from "@/modules/reports/service";
 import { financeSummary, getCurrentPlatformFee } from "@/modules/billing/service";
-import { collectedOnDay, businessToday } from "@/modules/collections/service";
 import { getBranchScope } from "@/lib/branch-scope";
 import { can } from "@/lib/rbac";
 import { StatCard } from "@/components/ui/stat-card";
@@ -49,15 +48,10 @@ export default async function CompanyDashboardPage() {
   const canSeeActivity = can(user, "reports", "view");
   const canSeeExceptions = can(user, "shipments", "updateStatus");
   const branchScope = getBranchScope(user);
-  const today = businessToday();
-  const [data, finance, feePerCarton, collectedToday] = await Promise.all([
+  const [data, finance, feePerCarton] = await Promise.all([
     companyDashboard(user.companyId!, branchScope),
     canSeeFinance ? financeSummary(user.companyId!, branchScope) : Promise.resolve(null),
     canSeeFinance ? getCurrentPlatformFee() : Promise.resolve(null),
-    // Not part of financeSummary any more: that version summed a cumulative column and counted
-    // every earlier instalment again on each day a shipment was touched. One definition of
-    // "collected" now, shared with the daily close sheet this figure links to.
-    canSeeFinance ? collectedOnDay(user.companyId!, today, { branchScope }) : Promise.resolve(0),
   ]);
 
   return (
@@ -104,32 +98,12 @@ export default async function CompanyDashboardPage() {
             </CardTitle>
             <Link href="/app/billing" className="text-xs text-primary hover:underline">التفاصيل والفواتير</Link>
           </CardHeader>
-          {/* All three figures are now doors, not decorations. A number a manager cannot open is a
-              number to look at rather than act on — the principle this dashboard already applied to
-              its status counters, applied here too now that each figure finally has somewhere to
-              lead. Each lands on the finance tab that explains it, and the customer/platform
-              separation survives the trip: two of these open المستحقات / إقفال اليوم, the third
-              opens رسوم المنصة, and no destination mixes the two. */}
-          <CardContent className="grid grid-cols-3 divide-x divide-x-reverse text-center">
-            <Link href={`/app/billing?tab=close&date=${today}`} className="px-2 rounded-lg hover:bg-accent">
-              <p className="text-lg font-bold text-success">{formatYER(collectedToday)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">المُحصّل اليوم</p>
-              <p className="text-2xs text-muted-foreground/70 mt-0.5">من قبض اليوم؟</p>
-            </Link>
-            {/* The figure used to be a dead end: it said how much is owed and offered no way to
-                find out by whom. It now opens the receivables tab, which groups the same population
-                by customer — same predicate on both sides (UNPAID_WHERE in modules/shipments), so
-                the screen this opens always adds up to the number that opened it. */}
-            <Link href="/app/billing?tab=receivables" className="px-2 rounded-lg hover:bg-accent">
-              <p className="text-lg font-bold text-warning">{formatYER(finance.outstanding)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">المتبقي على العملاء</p>
-              <p className="text-2xs text-muted-foreground/70 mt-0.5">من عليه؟</p>
-            </Link>
-            <Link href="/app/billing?tab=platform" className="px-2 rounded-lg hover:bg-accent">
-              <p className="text-lg font-bold">{formatYER(finance.platformFeesMTD)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">رسوم المنصة (هذا الشهر)</p>
+          <CardContent className="py-4">
+            <Link href="/app/billing" className="block px-2 rounded-lg hover:bg-accent py-2 transition-colors">
+              <p className="text-2xl font-bold">{formatYER(finance.platformFeesMTD)}</p>
+              <p className="text-sm text-muted-foreground mt-1">رسوم المنصة (هذا الشهر)</p>
               {feePerCarton != null && (
-                <p className="text-2xs text-muted-foreground/70 mt-0.5">
+                <p className="text-xs text-muted-foreground/70 mt-1">
                   {finance.cartonsMTD.toLocaleString()} كرتون × {formatYER(feePerCarton)}
                 </p>
               )}

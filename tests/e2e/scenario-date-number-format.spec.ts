@@ -63,40 +63,5 @@ test.describe("date and number formatting", () => {
     await cleanupTenant(t.company.id);
   });
 
-  test("the money column aligns with its own header", async ({ page }) => {
-    const t = await createTestTenant();
-    const [a, b] = t.branches;
-    for (const [price, paid] of [[40000, 0], [120000, 0], [8000, 8000]]) {
-      await createTestShipment({
-        companyId: t.company.id, customerId: t.customerId, loadBranchId: a.id, unloadBranchId: b.id,
-        cartonCount: 2, status: "IN_TRANSIT", shippingPrice: price, amountPaid: paid,
-      });
-    }
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await login(page, t.adminEmail);
-    await page.goto("/app/shipments");
-    await page.locator("table").waitFor();
 
-    // The header and every figure under it share one edge, and the figures share it with each
-    // other — which is the only way a column of money can be compared down the page.
-    const edges = await page.evaluate(() => {
-      const heads = [...document.querySelectorAll("thead th")];
-      const i = heads.findIndex((h) => h.textContent?.includes("المتبقي"));
-      const head = heads[i].getBoundingClientRect();
-      const cells = [...document.querySelectorAll("tbody tr")].map((r) => {
-        const td = r.querySelectorAll("td")[i] as HTMLElement;
-        const span = (td.querySelector("span") ?? td) as HTMLElement;
-        // The cell is dir="ltr", so text-end pins the *right* edge — which is precisely what
-        // units-over-units alignment means for a column of figures.
-        return { text: span.innerText.trim(), right: Math.round(span.getBoundingClientRect().right) };
-      });
-      return { headLeft: Math.round(head.left), headRight: Math.round(head.right), cells };
-    });
-
-    const rights = new Set(edges.cells.map((c) => c.right));
-    expect(rights.size, `figures must share one edge, got ${JSON.stringify(edges.cells)}`).toBe(1);
-    expect(edges.cells.some((c) => c.text.includes("120,000"))).toBe(true);
-
-    await cleanupTenant(t.company.id);
-  });
 });

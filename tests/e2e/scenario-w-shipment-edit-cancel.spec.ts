@@ -30,14 +30,12 @@ test.describe("Scenario W — shipment edit and cancel (DRAFT/REGISTERED only)",
     await shipmentOverflowAction(page, "تعديل البيانات");
     await page.fill('input[name="receiverName"]', "مستلم جديد");
     await page.fill('input[name="receiverPhone"]', "+967779999999");
-    await page.fill('input[name="shippingPrice"]', "1500");
     await page.click('[role="dialog"] button:has-text("حفظ التعديلات")');
     await expect(page.locator("text=مستلم جديد")).toBeVisible();
 
     const after = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
     expect(after.receiverName).toBe("مستلم جديد");
     expect(after.receiverPhone).toBe("+967779999999");
-    expect(Number(after.shippingPrice)).toBe(1500);
     // Untouched: identity, branches, carton count/codes, status.
     expect(after.shipmentNumber).toBe(before.shipmentNumber);
     expect(after.loadBranchId).toBe(before.loadBranchId);

@@ -131,10 +131,80 @@ export function assertAnyBranchMatch(branchScope: string | null | undefined, bra
   if (!branchIds.includes(branchScope)) throw new Error("FORBIDDEN: outside assigned branch");
 }
 
-/** Convenience wrapper for the Shipment case — same three fields `shipmentTouchesBranch` filters by. */
+/** Convenience wrapper for the Shipment case (Read/Visibility) — load/unload/current. */
 export function assertShipmentBranchAccess(
   branchScope: string | null | undefined,
   shipment: { loadBranchId: string; unloadBranchId: string; currentBranchId: string | null }
 ) {
   assertAnyBranchMatch(branchScope, [shipment.loadBranchId, shipment.unloadBranchId, shipment.currentBranchId]);
+}
+
+/** 
+ * Target Access Policy: Physical Operations
+ * Must be at the exact current branch location.
+ */
+export function assertShipmentPhysicalAccess(
+  branchScope: string | null | undefined,
+  shipment: { currentBranchId: string | null }
+) {
+  assertBranchMatch(branchScope, shipment.currentBranchId);
+}
+
+/** 
+ * Target Access Policy: Edit Operations
+ * Allowed for the ORIGIN branch ONLY.
+ */
+export function assertShipmentEditAccess(
+  branchScope: string | null | undefined,
+  shipment: { loadBranchId: string }
+) {
+  assertBranchMatch(branchScope, shipment.loadBranchId);
+}
+
+/** 
+ * Target Access Policy: Payment Operations
+ * Allowed for the ORIGIN branch or the CURRENT branch.
+ */
+export function assertShipmentPaymentAccess(
+  branchScope: string | null | undefined,
+  shipment: { loadBranchId: string; currentBranchId: string | null }
+) {
+  assertAnyBranchMatch(branchScope, [shipment.loadBranchId, shipment.currentBranchId]);
+}
+
+/**
+ * Target Access Policy: Redaction for Trip Details
+ * If the employee's branch is an intermediate stop (neither origin nor destination for this shipment),
+ * scrub sensitive PII and financial information.
+ */
+export function redactShipmentForBranch<T extends { loadBranchId: string; unloadBranchId: string; customer?: any; receiverName?: string; receiverPhone?: string; weightKg?: any; declaredValue?: any; shippingPrice?: any; amountPaid?: any; notes?: string | null }>(branchScope: string | null | undefined, shipment: T): T {
+  if (!branchScope) return shipment; // Company admins and drivers see everything
+
+  // If the shipment was loaded or unloaded at the user's branch, they need full context.
+  if (shipment.loadBranchId === branchScope || shipment.unloadBranchId === branchScope) {
+    return shipment;
+  }
+
+  // Otherwise, they are an intermediate stop and should only see that a shipment is on the truck,
+  // without PII or financials.
+  return {
+    ...shipment,
+    receiverName: "بيانات المستلم غير متاحة لهذه المحطة",
+    receiverPhone: "---",
+    weightKg: null,
+    declaredValue: null,
+    shippingPrice: null,
+    amountPaid: null,
+    notes: null,
+    ...(shipment.customer ? {
+      customer: {
+        ...shipment.customer,
+        name: "شحنة عابرة (Transit)",
+        phone: "---",
+        email: null,
+        altPhone: null,
+        address: null,
+      }
+    } : {})
+  };
 }

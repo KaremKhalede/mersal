@@ -198,7 +198,8 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
             const pendingUnload = stop.shipmentUnloads.filter((l) => l.loadedAt && !l.unloadedAt).length;
             const cartonsToLoad = stop.shipmentLoads.filter((l) => !l.loadedAt).reduce((s, l) => s + l.shipment.totalCartons, 0);
             const cartonsToUnload = stop.shipmentUnloads.filter((l) => l.loadedAt && !l.unloadedAt).reduce((s, l) => s + l.shipment.totalCartons, 0);
-            const eligible = stop.loadingEnabled && !tripClosed ? await getUnassignedShipmentsForStop(user.companyId!, trip.id, stop.branchId) : [];
+            const canLoadHere = stop.loadingEnabled && !tripClosed && !stop.actualDeparture && stop.status !== "DEPARTED" && stop.status !== "DONE";
+            const eligible = canLoadHere ? await getUnassignedShipmentsForStop(user.companyId!, trip.id, stop.branchId) : [];
             const timing = stopTiming(stop);
             const isDone = stop.status === "DEPARTED" || stop.status === "DONE";
             // A finished trip has no current stop. currentStopId falls back to the last stop so the

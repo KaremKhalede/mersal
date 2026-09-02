@@ -1,31 +1,22 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Truck, CheckCircle2, ShieldCheck, XCircle, Undo2, MoreVertical } from "lucide-react";
 import { DeliveryProofDialog } from "@/components/shell/delivery-proof-dialog";
-import { PaymentDialog } from "@/app/app/shipments/[id]/payment-dialog";
 import { confirmDeliveryRequestAction, markOutForDeliveryAction, markDeliveredAction, failDeliveryAction, cancelDeliveryRequestAction } from "./actions";
 
-export function DeliveryQueueActions({ requestId, shipmentId, status, receiverName, missingCartonCodes, amountPaid, shippingPrice, canRecordPayment }: { requestId: string; shipmentId: string; status: string; receiverName: string; missingCartonCodes: string[]; amountPaid: number; shippingPrice: number | null; canRecordPayment: boolean }) {
+export function DeliveryQueueActions({ requestId, shipmentId, status, receiverName, missingCartonCodes }: { requestId: string; shipmentId: string; status: string; receiverName: string; missingCartonCodes: string[] }) {
   const [pending, startTransition] = useTransition();
-  const [payOpen, setPayOpen] = useState(false);
-  const router = useRouter();
-  const outstanding = shippingPrice != null ? Math.max(0, shippingPrice - amountPaid) : 0;
 
-  // The handover flips the request to DELIVERED, so the branch that rendered the proof dialog is
-  // gone by the time payment is due. Owning the dialog here — outside every status branch — keeps
-  // it on screen through that refresh. Payment stays its own action with its own permission: a
-  // failed one leaves the delivery recorded and the shipment in the unpaid list.
+  const router = useRouter();
+
   return (
     <>
       {actions()}
-      {payOpen && (
-        <PaymentDialog shipmentId={shipmentId} amountPaid={amountPaid} shippingPrice={shippingPrice} open onOpenChange={setPayOpen} />
-      )}
     </>
   );
 
@@ -80,8 +71,6 @@ export function DeliveryQueueActions({ requestId, shipmentId, status, receiverNa
           receiverName={receiverName}
           missingCartonCodes={missingCartonCodes}
           action={(formData) => markDeliveredAction(requestId, shipmentId, formData)}
-          outstanding={outstanding}
-          onSuccess={outstanding > 0 && canRecordPayment ? () => setPayOpen(true) : undefined}
         />
         {/* Once a delivery is under way the honest close is "it failed", not "it never happened" —
             and the shipment goes back to being collectable at the branch counter. */}

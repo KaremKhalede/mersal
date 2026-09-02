@@ -9,7 +9,7 @@ import type { ShipmentStatus, ShipmentEvent, ExceptionType, PaymentMethod, Deliv
 import { SHIPMENT_STATUS_LABELS } from "@/lib/enums";
 import { logAudit } from "@/lib/audit";
 import { toMoney, toMoneyOrNull } from "@/lib/money";
-import { shipmentTouchesBranch, assertShipmentBranchAccess, assertBranchMatch, getBranchScope } from "@/lib/branch-scope";
+import { shipmentTouchesBranch, assertShipmentBranchAccess, assertShipmentPhysicalAccess, assertShipmentEditAccess, assertBranchMatch, getBranchScope } from "@/lib/branch-scope";
 import { assertSameCompany } from "@/lib/tenant";
 
 type Tx = Prisma.TransactionClient;
@@ -29,13 +29,9 @@ const STATUS_EVENT: Partial<Record<ShipmentStatus, ShipmentEvent>> = {
 };
 
 /**
- * Single choke point for every shipment mutation — company AND branch ownership both checked
- * here, so a Branch Employee who knows a shipment id outside their branch can't act on it via any
- * action that routes through this, even though they hold the RBAC permission. Lives in the plain
- * service module (not the "use server" actions file) specifically so it's directly callable from
- * tests without a request context — same pattern as dispatchShipmentEvent/chargeCartonFee.
+ * Any-Touch (Read/Visibility) — Company and branch ownership checked.
  */
-export async function assertOwnsShipment(
+export async function assertOwnsShipmentVisibility(
   user: { userType: string; companyId: string | null; role: { name: string } | null; branchId: string | null },
   shipmentId: string
 ) {
@@ -46,26 +42,32 @@ export async function assertOwnsShipment(
 }
 
 /**
- * Stricter sibling of assertOwnsShipment — for the two mutations that aren't tied to *any* branch
- * the shipment has ever touched, but specifically to where it physically sits right now: recording
- * a payment and editing intake details. Phase 6 finding: assertOwnsShipment's "any touch" rule lets
- * a Branch Employee at the origin branch record a payment or edit a shipment that has already moved
- * on to its destination branch, purely because their branch touched it once. Every other mutation
- * (receive, mark ready, confirm pickup, cancel, raise/resolve exception, status updates in general)
- * keeps the any-touch rule on purpose — those actions are each inherently tied to whichever specific
- * touchpoint matches, so "any touch" is the correct rule for them, not a gap. Only payment and edit
- * are generic record changes with no inherent location, which is exactly what made the any-touch
- * rule too permissive for them specifically.
+ * Target Access Policy: Physical Operations (e.g. Receive, Deliver, Exception)
  */
-export async function assertOwnsShipmentExact(
+export async function assertOwnsShipmentPhysical(
   user: { userType: string; companyId: string | null; role: { name: string } | null; branchId: string | null },
   shipmentId: string
 ) {
   const shipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
   assertSameCompany({ userType: "COMPANY_USER", companyId: user.companyId }, shipment.companyId);
-  assertBranchMatch(getBranchScope(user), shipment.currentBranchId);
+  assertShipmentPhysicalAccess(getBranchScope(user), shipment);
   return shipment;
 }
+
+/**
+ * Target Access Policy: Edit Details (Administrative)
+ */
+export async function assertOwnsShipmentEdit(
+  user: { userType: string; companyId: string | null; role: { name: string } | null; branchId: string | null },
+  shipmentId: string
+) {
+  const shipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+  assertSameCompany({ userType: "COMPANY_USER", companyId: user.companyId }, shipment.companyId);
+  assertShipmentEditAccess(getBranchScope(user), shipment);
+  return shipment;
+}
+
+
 
 export type CreateShipmentInput = {
   companyId: string;
@@ -80,9 +82,6 @@ export type CreateShipmentInput = {
   declaredValue?: number;
   notes?: string;
   createdById?: string;
-  shippingPrice?: number;
-  amountPaid?: number;
-  paymentMethod?: PaymentMethod;
 };
 
 export async function createShipment(input: CreateShipmentInput) {
@@ -107,11 +106,6 @@ export async function createShipment(input: CreateShipmentInput) {
         totalCartons: input.cartonCount,
         status: "REGISTERED",
         createdById: input.createdById,
-        shippingPrice: input.shippingPrice,
-        amountPaid: input.amountPaid ?? 0,
-        paymentMethod: input.paymentMethod,
-        paymentDate: input.amountPaid ? new Date() : undefined,
-        paymentReceivedById: input.amountPaid ? input.createdById : undefined,
       },
     });
 
@@ -145,26 +139,6 @@ export async function createShipment(input: CreateShipmentInput) {
     metadata: { shipmentNumber },
   });
 
-  // Money taken at the counter during intake ("المدفوع الآن" on the new-shipment dialog) is a cash
-  // movement exactly like one taken later through recordPayment — same drawer, same employee, same
-  // day. It just never left a trace anyone could add up: the CREATE entry above records only the
-  // shipment number, so the daily close (src/modules/collections/service.ts) had no event for it
-  // and the till would come up short by every prepaid shipment registered that day.
-  //
-  // Emitted as RECORD_PAYMENT, not a new action name, so there is ONE payment event stream to walk
-  // rather than two shapes to reconcile — and `metadata.amountPaid` carries the same meaning it
-  // does in recordPayment: the shipment's cumulative paid total *after* this payment, which for an
-  // intake payment is the payment itself. recordPayment is deliberately untouched.
-  if (input.amountPaid) {
-    await logAudit({
-      companyId: input.companyId,
-      userId: input.createdById,
-      action: "RECORD_PAYMENT",
-      entityType: "Shipment",
-      entityId: shipment.id,
-      metadata: { amountPaid: input.amountPaid, paymentMethod: input.paymentMethod ?? "CASH" },
-    });
-  }
 
   return shipment;
 }
@@ -273,10 +247,6 @@ export async function listShipments(params: {
   /** Restricts to shipments that touch this branch (load/unload/current) — set for
    * branch-scoped roles, omitted for company-wide roles. See src/lib/branch-scope.ts. */
   branchId?: string | null;
-  /** Only shipments the customer still owes money on — the same predicate billingSummary sums
-   * into the dashboard's "المتبقي على العملاء", so the list can never disagree with the figure
-   * that links to it. See UNPAID_WHERE. */
-  unpaid?: boolean;
 }) {
   const page = params.page ?? 1;
   const pageSize = params.pageSize ?? 20;
@@ -288,7 +258,6 @@ export async function listShipments(params: {
     ...(params.status ? { status: params.status } : {}),
     AND: [
       params.branchId ? shipmentTouchesBranch(params.branchId) : {},
-      params.unpaid ? UNPAID_WHERE : {},
       params.search
         ? {
             OR: [
@@ -340,7 +309,7 @@ export async function shipmentStatusCounts(companyId: string, branchId?: string 
 
 /** Every matching shipment, unpaginated — backs the "تصدير" CSV export, which must cover the
  * whole filtered set, not just the page currently on screen. */
-export async function listShipmentsForExport(params: { companyId: string; status?: ShipmentStatus; search?: string; branchId?: string | null; unpaid?: boolean; dir?: ShipmentSortDirection }) {
+export async function listShipmentsForExport(params: { companyId: string; status?: ShipmentStatus; search?: string; branchId?: string | null; dir?: ShipmentSortDirection }) {
   const { items } = await listShipments({ ...params, page: 1, pageSize: 10_000 });
   return items;
 }
@@ -491,12 +460,12 @@ export async function confirmBranchPickup(shipmentId: string, proof: DeliveryPro
 export async function updateShipmentDetails(
   companyId: string,
   shipmentId: string,
-  input: { receiverName: string; receiverPhone: string; goodsType?: string; weightKg?: number; notes?: string; shippingPrice?: number },
+  input: { receiverName: string; receiverPhone: string; goodsType?: string; weightKg?: number; notes?: string },
   opts: { userId?: string; branchScope?: string | null } = {}
 ) {
   const shipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
   assertSameCompany({ userType: "COMPANY_USER", companyId }, shipment.companyId);
-  assertBranchMatch(opts.branchScope, shipment.currentBranchId);
+  assertShipmentEditAccess(opts.branchScope, shipment);
   if (shipment.status !== "DRAFT" && shipment.status !== "REGISTERED") {
     throw new Error("لا يمكن تعديل الشحنة بعد بدء تجهيزها");
   }
@@ -509,7 +478,6 @@ export async function updateShipmentDetails(
       goodsType: input.goodsType,
       weightKg: input.weightKg,
       notes: input.notes,
-      shippingPrice: input.shippingPrice,
     },
   });
 
@@ -531,7 +499,9 @@ export async function updateShipmentDetails(
 export async function cancelDraftShipment(companyId: string, shipmentId: string, opts: { userId?: string; branchScope?: string | null } = {}) {
   const shipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
   assertSameCompany({ userType: "COMPANY_USER", companyId }, shipment.companyId);
-  assertShipmentBranchAccess(opts.branchScope, shipment);
+  // Target Access Policy: Administrative action, limited to ORIGIN branch for cancellations.
+  // We can enforce ORIGIN specifically since it's a draft cancel. 
+  assertShipmentEditAccess(opts.branchScope, shipment);
   if (shipment.status !== "DRAFT" && shipment.status !== "REGISTERED") {
     throw new Error("لا يمكن إلغاء الشحنة بعد بدء تجهيزها — استخدم الاستثناء بدلاً من ذلك");
   }
@@ -554,32 +524,6 @@ export async function cancelDraftShipment(companyId: string, shipmentId: string,
   return cancelled;
 }
 
-/** Records/updates the customer's shipping payment — separate from the platform's per-carton ledger fee. */
-export async function recordPayment(
-  shipmentId: string,
-  input: { amountPaid: number; paymentMethod: PaymentMethod; userId?: string }
-) {
-  const shipment = await prisma.shipment.update({
-    where: { id: shipmentId },
-    data: {
-      amountPaid: input.amountPaid,
-      paymentMethod: input.paymentMethod,
-      paymentDate: new Date(),
-      paymentReceivedById: input.userId,
-    },
-  });
-
-  await logAudit({
-    companyId: shipment.companyId,
-    userId: input.userId,
-    action: "RECORD_PAYMENT",
-    entityType: "Shipment",
-    entityId: shipmentId,
-    metadata: { amountPaid: input.amountPaid, paymentMethod: input.paymentMethod },
-  });
-
-  return shipment;
-}
 
 /**
  * A carton that was recorded MISSING turns up after the shipment was already handed over.
