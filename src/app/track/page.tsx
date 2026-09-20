@@ -37,6 +37,16 @@ export const metadata: Metadata = {
   description: "أدخل رقم الشحنة وآخر 4 أرقام من جوال المستلم لمتابعة حالة شحنتك.",
 };
 
+// This is the one page with no auth cookie and no dynamic params, so Next would otherwise try to
+// statically prerender it at BUILD time — which fails outright in any pipeline that builds the
+// image/bundle before a database is reachable (a plain `docker build`, most CI runners, most
+// Cloudflare/edge build steps), and even where a build-time DB happens to be reachable (e.g. a
+// Vercel build using the production DATABASE_URL), it would freeze the platform's support contact
+// info as of build time instead of reflecting an admin's later edit in /platform/settings. Forcing
+// dynamic rendering costs one extra query per visit on a very low-traffic page and removes both
+// problems.
+export const dynamic = "force-dynamic";
+
 
 export default async function TrackLookupPage() {
   // A single-row table, and the only query this page runs before the visitor types anything.

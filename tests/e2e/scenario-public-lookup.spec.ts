@@ -34,20 +34,27 @@ function form(fields: Record<string, string>) {
 }
 
 test.describe("The bare domain serves customers, not a staff password field", () => {
-  test("an anonymous visitor to / lands on the lookup, and can still reach login", async ({ page }) => {
+  test("an anonymous visitor to / lands on the marketing home, can reach tracking without knowing the URL, and can still reach login", async ({ page }) => {
+    // The bare domain is now the marketing landing page (Hero, features, FAQ, ... — the product's
+    // own spec calls for it), not a bare redirect to /track. What this test actually guards is the
+    // load-bearing claim in its own title: a customer with only a shipment number, and a staff
+    // member with only a password, must each have a visible, one-click way to their own page from
+    // here — neither should have to already know a URL by heart.
     await page.context().clearCookies();
     await page.goto("/");
+    await expect(page).not.toHaveURL(/\/login/);
+
+    await page.getByRole("link", { name: /تتبّع شحنتك/ }).click();
     await expect(page).toHaveURL(/\/track$/);
     await expect(visibleText(page, "تتبّع شحنتك").first()).toBeVisible();
 
-    // The staff link lives in the brand bar now — one link, not one there and another under the
-    // form. Customers outnumber employees on this page by orders of magnitude; employees bookmark.
-    await page.getByRole("link", { name: /دخول الموظفين/ }).click();
+    // Scoped to the nav bar ("banner" landmark) — the landing page repeats a "تسجيل الدخول" link in
+    // its hero, its contact section, and its footer too, so an unscoped lookup is ambiguous.
+    await page.goto("/");
+    await page.getByRole("banner").getByRole("link", { name: /تسجيل الدخول/ }).click();
     await expect(page).toHaveURL(/\/login/);
-    // And back the other way, for anyone who bookmarked the login screen.
-    await expect(page.getByRole("link", { name: /تتبّع شحنة/ })).toBeVisible();
-
-    await page.goto("/login");
+    // And back the other way, for anyone who bookmarked the login screen with only a shipment to
+    // check on.
     await page.getByRole("link", { name: /تتبّع شحنة/ }).click();
     await expect(page).toHaveURL(/\/track$/);
   });

@@ -85,8 +85,14 @@ export default function LoginPage() {
                   </Link>
                 </p>
                 <p className="text-[13px] font-medium text-gray-400">
+                  وصلت هنا وتريد تتبّع شحنة فقط؟{" "}
+                  <Link href="/track" className="text-[var(--navy)] font-bold hover:underline">
+                    تتبّع شحنة
+                  </Link>
+                </p>
+                <p className="text-[13px] font-medium text-gray-400">
                   تحتاج مساعدة؟{" "}
-                  <Link href="#" className="text-[var(--navy)] font-bold hover:underline">
+                  <Link href="/#contact" className="text-[var(--navy)] font-bold hover:underline">
                     تواصل معنا
                   </Link>
                 </p>

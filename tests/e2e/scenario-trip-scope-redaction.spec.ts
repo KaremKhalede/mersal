@@ -1,9 +1,13 @@
 import { test, expect } from "@playwright/test";
+import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { getTripDetail, cancelTrip, assignTripCrew } from "@/modules/trips/service";
-import { getBranchScope } from "@/lib/branch-scope";
-import { assertCan } from "@/lib/rbac";
 import { nextTripNumber, nextShipmentNumber } from "@/lib/ids";
+
+/** Only `.id` and `.branchId` are ever read off these in this file. They must be real `User` rows,
+ * not hand-built objects with made-up ids: `assignTripCrew`/`cancelTrip` write an AuditLog row
+ * stamped with this id, and `AuditLog.userId` carries a foreign key to `User.id`. */
+type MockUser = { id: string; branchId: string | null };
 
 test.describe("Target Access Policy - Trip Scope Redaction & Administration", () => {
   let companyId: string;
@@ -11,12 +15,11 @@ test.describe("Target Access Policy - Trip Scope Redaction & Administration", ()
   let jeddahId: string;
   let seiyunId: string;
   let tripId: string;
-  let adminUserId: string;
 
-  let mockRiyadhUser: any;
-  let mockJeddahUser: any;
-  let mockSeiyunUser: any;
-  let mockAdmin: any;
+  let mockRiyadhUser: MockUser;
+  let mockJeddahUser: MockUser;
+  let mockSeiyunUser: MockUser;
+  let mockAdmin: MockUser;
 
   test.beforeAll(async () => {
     // 1. Setup Company and Branches
@@ -41,12 +44,19 @@ test.describe("Target Access Policy - Trip Scope Redaction & Administration", ()
       },
     });
 
-    // 3. Setup Users
-    mockRiyadhUser = { id: "u-riyadh", userType: "COMPANY_USER", companyId, branchId: riyadhId, role };
-    mockJeddahUser = { id: "u-jeddah", userType: "COMPANY_USER", companyId, branchId: jeddahId, role };
-    mockSeiyunUser = { id: "u-seiyun", userType: "COMPANY_USER", companyId, branchId: seiyunId, role };
-    mockAdmin = { id: "u-admin", userType: "COMPANY_USER", companyId, branchId: null, role: { name: "company_admin" } };
-    adminUserId = "admin-123"; // just a placeholder string
+    // 3. Setup Users — real User rows, not hand-built objects: assignTripCrew/cancelTrip write an
+    // AuditLog row carrying this id as a foreign key, so it must resolve to an actual user.
+    const passwordHash = await bcrypt.hash("Passw0rd!", 10);
+    const [riyadhUser, jeddahUser, seiyunUser, adminUser] = await Promise.all([
+      prisma.user.create({ data: { companyId, branchId: riyadhId, roleId: role.id, name: "موظف الرياض", email: `riyadh-${Date.now()}@test.local`, passwordHash, userType: "COMPANY_USER" } }),
+      prisma.user.create({ data: { companyId, branchId: jeddahId, roleId: role.id, name: "موظف جدة", email: `jeddah-${Date.now()}@test.local`, passwordHash, userType: "COMPANY_USER" } }),
+      prisma.user.create({ data: { companyId, branchId: seiyunId, roleId: role.id, name: "موظف سيئون", email: `seiyun-${Date.now()}@test.local`, passwordHash, userType: "COMPANY_USER" } }),
+      prisma.user.create({ data: { companyId, branchId: null, roleId: role.id, name: "مدير الشركة", email: `admin-${Date.now()}@test.local`, passwordHash, userType: "COMPANY_USER" } }),
+    ]);
+    mockRiyadhUser = { id: riyadhUser.id, branchId: riyadhUser.branchId };
+    mockJeddahUser = { id: jeddahUser.id, branchId: jeddahUser.branchId };
+    mockSeiyunUser = { id: seiyunUser.id, branchId: seiyunUser.branchId };
+    mockAdmin = { id: adminUser.id, branchId: adminUser.branchId };
 
     // 4. Setup Customer
     const customer = await prisma.customer.create({
@@ -102,7 +112,13 @@ test.describe("Target Access Policy - Trip Scope Redaction & Administration", ()
   });
 
   test.afterAll(async () => {
-    if (companyId) await prisma.company.deleteMany({ where: { id: companyId } });
+    if (!companyId) return;
+    // Trip -> TripStop/TripShipmentStop cascade on Trip's own id, but TripStop.branchId has no
+    // cascade back to Branch (deleting a branch must not silently wipe historical trip-stop
+    // records in production) — so the trip has to go first, or Company's cascade to Branch hits a
+    // TripStop row still pointing at it and the whole delete fails with a foreign key violation.
+    await prisma.trip.deleteMany({ where: { companyId } });
+    await prisma.company.deleteMany({ where: { id: companyId } });
   });
 
   test("Riyadh employee (ORIGIN) sees full PII and can assign crew / cancel trip", async () => {

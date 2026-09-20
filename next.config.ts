@@ -13,6 +13,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Emits a self-contained `.next/standalone` build (server + only the node_modules it actually
+  // needs) so the Docker image below can copy a few files instead of the whole repo + full
+  // node_modules. Vercel's own builder ignores this and uses its own packaging, so it is safe to
+  // set unconditionally — it only changes what `next build` writes to disk locally/in Docker.
+  output: "standalone",
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

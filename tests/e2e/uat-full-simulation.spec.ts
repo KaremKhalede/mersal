@@ -651,8 +651,8 @@ test.describe.serial("UAT — full real-world shipment cycle (مؤسسة الن�
 
   test("16. Financial integrity — platform fee (80 YER total) is fully independent of customer revenue (45,000 YER on A alone)", async ({ page }) => {
     const entries = await prisma.billingLedgerEntry.findMany({ where: { companyId: tenant.company.id } });
-    const totalPlatformFee = Number(bA.platformFee) + Number(bB.platformFee);
-    expect(totalPlatformFee).toBe(40 + 40);
+    const totalPlatformFee = entries.reduce((sum, e) => sum + Number(e.amount), 0);
+    expect(totalPlatformFee).toBe(80);
 
     await login(page, tenant.adminEmail);
     await page.goto("/app/billing?tab=platform");

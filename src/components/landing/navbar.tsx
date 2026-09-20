@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Menu, X, PhoneCall, LogIn } from "lucide-react";
+import { Menu, X, PhoneCall, LogIn, Package } from "lucide-react";
 import Logo from "./logo";
 import { navLinks } from "@/data/landing-content";
 
@@ -11,6 +11,7 @@ export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
   const isHome = pathname === "/";
 
   useEffect(() => {
@@ -30,7 +31,9 @@ export default function Navbar() {
   const handleNavClick = (href: string) => {
     setOpen(false);
     if (!isHome) {
-      window.location.href = "/" + href;
+      // Client-side navigation to the home page's anchor, instead of a full page reload — Next's
+      // router still lands on and scrolls to the #hash target once the home page has mounted.
+      router.push("/" + href);
       return;
     }
     const el = document.querySelector(href);
@@ -68,6 +71,15 @@ export default function Navbar() {
           </nav>
 
           <div className="hidden lg:flex items-center gap-2.5">
+            {/* A shipment-tracking customer, not a company employee, is the far more common visitor
+                to the bare domain — this link is their way in without knowing the /track URL by heart. */}
+            <Link
+              href="/track"
+              className="px-3 py-2 text-sm font-semibold text-[var(--chargee-text)]/80 hover:text-[var(--chargee-orange)] transition-colors flex items-center gap-1.5"
+            >
+              <Package size={16} />
+              تتبّع شحنتك
+            </Link>
             <button onClick={() => handleNavClick("#contact")} className="chargee-primary-button !py-2 !px-5 text-sm !min-h-0 h-10">
               <PhoneCall size={16} />
               تواصل معنا
@@ -107,6 +119,14 @@ export default function Navbar() {
                 {link.label}
               </button>
             ))}
+            <Link
+              href="/track"
+              onClick={() => setOpen(false)}
+              className="text-right px-4 py-3 rounded-xl text-[var(--chargee-text)] font-semibold hover:bg-[var(--chargee-bg)] hover:text-[var(--chargee-orange)] transition-colors flex items-center gap-2"
+            >
+              <Package size={18} />
+              تتبّع شحنتك
+            </Link>
             <div className="h-px bg-[var(--chargee-border)] my-2" />
             <button
               onClick={() => handleNavClick("#contact")}

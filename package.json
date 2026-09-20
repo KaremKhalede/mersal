@@ -11,8 +11,8 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
-    "db:seed": "tsx prisma/seed.ts",
-    "db:bootstrap": "tsx prisma/bootstrap.ts"
+    "db:seed": "tsx --env-file=.env prisma/seed.ts",
+    "db:bootstrap": "tsx --env-file=.env prisma/bootstrap.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1106.0",

@@ -116,9 +116,11 @@ test.describe("Scenario Y — activity log branch scoping + exact-branch payment
     const employeeAtA = { userType: "COMPANY_USER", companyId: tenant.company.id, role: { name: "موظف فرع" }, branchId: branchA.id };
     const employeeAtB = { userType: "COMPANY_USER", companyId: tenant.company.id, role: { name: "موظف فرع" }, branchId: branchB.id };
 
-    // Positive control 1: they can still see it (any-touch)
+    // Positive control 1: the origin branch can still see it (any-touch).
     await expect(assertOwnsShipmentVisibility(employeeAtA, shipment.id)).resolves.toBeTruthy();
-    
+    // Positive control 2: so can the branch actually holding it now — any-touch means either end.
+    await expect(assertOwnsShipmentVisibility(employeeAtB, shipment.id)).resolves.toBeTruthy();
+
     await cleanupTenant(tenant.company.id);
   });
 
@@ -162,7 +164,8 @@ test.describe("Scenario Y — activity log branch scoping + exact-branch payment
     await shipmentOverflowAction(page, "تعديل البيانات");
     await page.fill('input[name="receiverPhone"]', "+967779999998");
     await page.click('[role="dialog"] button:has-text("حفظ التعديلات")');
-    await expect(page.locator("text=+967779999998")).toBeVisible();
+    // Rendered with spaces for display (formatPhoneDisplay), not the raw digits the form submitted.
+    await expect(page.getByText(/\+967\s*779\s*999\s*998/)).toBeVisible();
 
     await cleanupTenant(tenant.company.id);
   });

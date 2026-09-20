@@ -69,6 +69,16 @@ jobs:
       - name: Production build
         run: npm run build
 
+      # Builds the Dockerfile in complete isolation from the job's Postgres service — no
+      # DATABASE_URL, no network path to it at all. This is the check that actually catches a page
+      # quietly depending on a live database at build time (as /track once did: it has no auth
+      # cookie and no dynamic params, so Next tried to statically prerender it, which only fails
+      # when there truly is no database to reach — the step above always has one sitting right next
+      # to it and would never have caught that). Anything deployed via Docker, or via a Cloudflare/CI
+      # pipeline that builds before a database is provisioned, hits this exact failure mode.
+      - name: Docker image builds with no database reachable
+        run: docker build -t chargee:ci .
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

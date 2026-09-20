@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { PhoneCall, Mail, MapPin } from "lucide-react";
 import Logo from "./logo";
@@ -8,11 +8,13 @@ import { navLinks } from "@/data/landing-content";
 
 export default function Footer() {
   const pathname = usePathname();
+  const router = useRouter();
   const isHome = pathname === "/";
 
   const handleNavClick = (href: string) => {
     if (!isHome) {
-      window.location.href = "/" + href;
+      // Client-side navigation to the home page's anchor, instead of a full page reload.
+      router.push("/" + href);
       return;
     }
     document.querySelector(href)?.scrollIntoView({ behavior: "smooth" });

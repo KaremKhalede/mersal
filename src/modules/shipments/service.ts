@@ -5,11 +5,11 @@ import { newTrackingToken, matchesPhoneLast4 } from "@/lib/tracking";
 import { assertTransition, exceptionRecoveryTargets, RECOVERY_ACTION_LABELS } from "./state-machine";
 import { dispatchShipmentEvent } from "@/modules/notifications/service";
 import { chargeCartonFee, reverseUnbilledCartonFee } from "@/modules/billing/service";
-import type { ShipmentStatus, ShipmentEvent, ExceptionType, PaymentMethod, DeliveryChannel } from "@/lib/enums";
+import type { ShipmentStatus, ShipmentEvent, ExceptionType, DeliveryChannel } from "@/lib/enums";
 import { SHIPMENT_STATUS_LABELS } from "@/lib/enums";
 import { logAudit } from "@/lib/audit";
 import { toMoney, toMoneyOrNull } from "@/lib/money";
-import { shipmentTouchesBranch, assertShipmentBranchAccess, assertShipmentPhysicalAccess, assertShipmentEditAccess, assertBranchMatch, getBranchScope } from "@/lib/branch-scope";
+import { shipmentTouchesBranch, assertShipmentBranchAccess, assertShipmentPhysicalAccess, assertShipmentEditAccess, assertShipmentDetailsAccess, getBranchScope } from "@/lib/branch-scope";
 import { assertSameCompany } from "@/lib/tenant";
 
 type Tx = Prisma.TransactionClient;
@@ -51,19 +51,6 @@ export async function assertOwnsShipmentPhysical(
   const shipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
   assertSameCompany({ userType: "COMPANY_USER", companyId: user.companyId }, shipment.companyId);
   assertShipmentPhysicalAccess(getBranchScope(user), shipment);
-  return shipment;
-}
-
-/**
- * Target Access Policy: Edit Details (Administrative)
- */
-export async function assertOwnsShipmentEdit(
-  user: { userType: string; companyId: string | null; role: { name: string } | null; branchId: string | null },
-  shipmentId: string
-) {
-  const shipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
-  assertSameCompany({ userType: "COMPANY_USER", companyId: user.companyId }, shipment.companyId);
-  assertShipmentEditAccess(getBranchScope(user), shipment);
   return shipment;
 }
 
@@ -465,7 +452,7 @@ export async function updateShipmentDetails(
 ) {
   const shipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
   assertSameCompany({ userType: "COMPANY_USER", companyId }, shipment.companyId);
-  assertShipmentEditAccess(opts.branchScope, shipment);
+  assertShipmentDetailsAccess(opts.branchScope, shipment);
   if (shipment.status !== "DRAFT" && shipment.status !== "REGISTERED") {
     throw new Error("لا يمكن تعديل الشحنة بعد بدء تجهيزها");
   }

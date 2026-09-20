@@ -1,0 +1,74 @@
+# Self-host stack: the app + its own Postgres, for a VPS, a home server, or any Docker host sitting
+# behind a Cloudflare Tunnel (see docs/DEPLOYMENT.md). Not used by Vercel or Cloudflare Workers
+# deployments — those read the same image differently or don't use Docker at all.
+#
+# STORAGE_DRIVER is intentionally required as "s3" here (Cloudflare R2 works and has no egress
+# fees) rather than "local": src/modules/documents/storage.ts refuses to boot with the local driver
+# in production on purpose, because a container can be redeployed or rescheduled at any time and a
+# local upload directory does not follow it. Point it at R2/S3/MinIO instead of fighting that guard.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chargee
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: chargee
+    volumes:
+      - chargee_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chargee -d chargee"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    # Targets the "builder" stage, not the final runtime image: that's the one stage that still has
+    # the full node_modules (including the `prisma` CLI, a devDependency stripped from the final
+    # image) and runs as root, so `npx prisma` resolves locally instead of trying to fetch itself
+    # from the registry, and doesn't need a writable $HOME the way the final image's unprivileged
+    # `nextjs` user doesn't have.
+    build:
+      context: .
+      target: builder
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://chargee:${POSTGRES_PASSWORD:?}@db:5432/chargee"
+      DIRECT_URL: "postgresql://chargee:${POSTGRES_PASSWORD:?}@db:5432/chargee"
+    entrypoint: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://chargee:${POSTGRES_PASSWORD:?}@db:5432/chargee"
+      DIRECT_URL: "postgresql://chargee:${POSTGRES_PASSWORD:?}@db:5432/chargee"
+      SESSION_SECRET: "${SESSION_SECRET:?set SESSION_SECRET in .env, e.g. output of openssl rand -hex 32}"
+      APP_URL: "${APP_URL:?set APP_URL in .env to your public https URL}"
+      STORAGE_DRIVER: s3
+      S3_BUCKET: "${S3_BUCKET:?}"
+      S3_REGION: "${S3_REGION:-auto}"
+      S3_ENDPOINT: "${S3_ENDPOINT:?set S3_ENDPOINT in .env to your R2/S3 endpoint URL}"
+      S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:?}"
+      S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:?}"
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-mock}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN:-}
+
+volumes:
+  chargee_pgdata:

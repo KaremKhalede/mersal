@@ -150,15 +150,35 @@ export function assertShipmentPhysicalAccess(
   assertBranchMatch(branchScope, shipment.currentBranchId);
 }
 
-/** 
- * Target Access Policy: Edit Operations
- * Allowed for the ORIGIN branch ONLY.
+/**
+ * Target Access Policy: Draft Cancellation (Administrative)
+ * Allowed for the ORIGIN branch ONLY — narrow and deliberate for `cancelDraftShipment`, which only
+ * ever applies to a shipment still in DRAFT/REGISTERED, i.e. one that in practice has not left its
+ * origin yet. NOT a general-purpose "can this branch edit this shipment" check — see
+ * `assertShipmentDetailsAccess` below for that. (This function used to be reused for both, which is
+ * exactly how a Branch Employee at the origin kept editing a shipment's receiver/PII forever, long
+ * after it had physically moved to another branch's care — the origin branch stays "allowed" under
+ * this rule even once the shipment is nowhere near it.)
  */
 export function assertShipmentEditAccess(
   branchScope: string | null | undefined,
   shipment: { loadBranchId: string }
 ) {
   assertBranchMatch(branchScope, shipment.loadBranchId);
+}
+
+/**
+ * Target Access Policy: Generic Record Edits (intake details)
+ * A record edit has no touchpoint of its own the way loading/unloading/receiving do — it can be
+ * triggered from wherever staff happen to be, so it must be pinned to the shipment's CURRENT
+ * location, not wherever it started. Used by `updateShipmentDetails` in
+ * src/modules/shipments/service.ts.
+ */
+export function assertShipmentDetailsAccess(
+  branchScope: string | null | undefined,
+  shipment: { currentBranchId: string | null }
+) {
+  assertBranchMatch(branchScope, shipment.currentBranchId);
 }
 
 /** 
@@ -177,7 +197,25 @@ export function assertShipmentPaymentAccess(
  * If the employee's branch is an intermediate stop (neither origin nor destination for this shipment),
  * scrub sensitive PII and financial information.
  */
-export function redactShipmentForBranch<T extends { loadBranchId: string; unloadBranchId: string; customer?: any; receiverName?: string; receiverPhone?: string; weightKg?: any; declaredValue?: any; shippingPrice?: any; amountPaid?: any; notes?: string | null }>(branchScope: string | null | undefined, shipment: T): T {
+export function redactShipmentForBranch<
+  T extends {
+    loadBranchId: string;
+    unloadBranchId: string;
+    customer?: Record<string, unknown> | null;
+    receiverName?: string;
+    receiverPhone?: string;
+    // `unknown`, not `number | null`: callers pass this both before and after the Decimal->number
+    // conversion documented in prisma/schema.prisma (some read paths in modules/trips/service.ts
+    // redact a raw Prisma result, Decimal fields and all, ahead of that conversion). `unknown`
+    // keeps every caller's real shape intact through this generic (same as the `any` it replaces,
+    // for inference purposes) without re-opening the no-explicit-any lint error.
+    weightKg?: unknown;
+    declaredValue?: unknown;
+    shippingPrice?: unknown;
+    amountPaid?: unknown;
+    notes?: string | null;
+  },
+>(branchScope: string | null | undefined, shipment: T): T {
   if (!branchScope) return shipment; // Company admins and drivers see everything
 
   // If the shipment was loaded or unloaded at the user's branch, they need full context.
