@@ -1,0 +1,4 @@
+# Shell scripts are meant to run on Linux servers (curl | bash) — force LF regardless of the
+# committer's platform, since a checkout on Windows with core.autocrlf=true would otherwise turn
+# them into CRLF, and a shebang line ending in \r fails outright on Linux ("bad interpreter").
+*.sh text eol=lf

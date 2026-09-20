@@ -56,55 +56,60 @@
 
 ---
 
-## الخيار 2: استضافة ذاتية (VPS) عبر Docker + Cloudflare Tunnel
+## الخيار 2: استضافة ذاتية مجانية — Oracle Cloud Free Tier + Docker + Cloudflare Tunnel
 
-مناسب إذا كنت تفضّل التحكم الكامل بالخادم أو تجنّب الاشتراك في Vercel. تم بناء صورة Docker واختبارها
-فعليًا ضمن هذا العمل (`Dockerfile`, `docker-compose.yml`) — الإقلاع، تطبيق الترحيلات، وفحص `/api/health`
-جميعها نجحت.
+هذا الخيار **بدون أي تكلفة شهرية**: خادم مجاني للأبد من Oracle Cloud (وليس عرضًا تجريبيًا محدودًا)،
+قاعدة بيانات PostgreSQL تعمل داخل نفس الخادم (لا حاجة لحساب Neon هنا)، تخزين ملفات مجاني عبر Cloudflare
+R2، وربط عبر Cloudflare Tunnel. تم بناء صورة Docker واختبارها فعليًا (`Dockerfile`, `docker-compose.yml`)
+— الإقلاع، تطبيق الترحيلات، وفحص `/api/health` جميعها نجحت.
+
+**الحسابات الوحيدة التي لازم تنشئها بنفسك** (تتطلب هويتك الشخصية، لا يمكن لأحد إنشاءها نيابة عنك):
+حساب Oracle Cloud، وحساب Cloudflare. كل شيء بعد ذلك آلي بسكربت واحد.
 
 ### الخطوات
 
-1. **جهّز خادمًا** (أي مزود: Hetzner، DigitalOcean، أي VPS بذاكرة 2GB فأكثر) مع Docker وDocker Compose
-   مثبّتين.
-2. **انسخ المشروع** إلى الخادم وأنشئ ملف `.env` (وليس `.env.docker-test`) بجانب `docker-compose.yml`
-   يحتوي على الأقل:
-   ```env
-   POSTGRES_PASSWORD=...
-   SESSION_SECRET=...            # openssl rand -hex 32
-   APP_URL=https://track.yourcompany.com
-   S3_BUCKET=...
-   S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-   S3_ACCESS_KEY_ID=...
-   S3_SECRET_ACCESS_KEY=...
-   ```
-   (أنشئ حاوية R2 من لوحة كلاوفلير → R2 → Create bucket، ثم Manage API Tokens لإصدار المفاتيح. R2 بلا
-   رسوم إخراج بيانات (egress) وهو الخيار الطبيعي هنا لأنك أصلًا تستخدم كلاوفلير.)
-3. **شغّل التطبيق**:
+1. **أنشئ حساب [Oracle Cloud](https://www.oracle.com/cloud/free/)** (يطلب بطاقة بنكية للتحقق من الهوية
+   فقط، بدون أي خصم فعلي طالما بقيت ضمن الحد المجاني) وأنشئ خادمًا (Compute Instance) بمواصفات
+   "Always Free" — Ubuntu، أي حجم من ضمن القائمة المجانية.
+2. **أنشئ حاوية R2** من لوحة كلاوفلير → R2 → Create bucket، ثم Manage API Tokens لإصدار مفاتيح
+   بصلاحية قراءة/كتابة. احتفظ بـ: Bucket name، Endpoint، Access Key ID، Secret Access Key.
+3. **اتصل بالخادم عبر SSH** وشغّل سكربت الإعداد الجاهز:
    ```bash
-   docker compose up -d --build
+   curl -fsSL https://raw.githubusercontent.com/KaremKhalede/mersal/main/scripts/server-setup.sh | bash
    ```
-   هذا يشغّل قاعدة PostgreSQL، ثم خدمة `migrate` التي تطبّق الترحيلات وتتوقف تلقائيًا (طبيعي أن تظهر
-   بحالة `Exited (0)`)، ثم يشغّل التطبيق على المنفذ `3000`.
-4. **أنشئ حساب مدير المنصة الأول**:
+   يثبّت Docker، ينسخ المشروع، ويولّد كلمة مرور قاعدة البيانات وسر الجلسة تلقائيًا. سيتوقف ويطلب منك
+   تعديل ملف `.env` بقيم R2 من الخطوة 2 (والنطاق الذي ستربطه لاحقًا في `APP_URL`):
    ```bash
-   docker compose exec app sh -c \
-     "BOOTSTRAP_ADMIN_EMAIL=you@company.com BOOTSTRAP_ADMIN_PASSWORD='StrongPass!23' BOOTSTRAP_ADMIN_NAME='اسمك' node_modules/.bin/tsx prisma/bootstrap.ts"
+   nano ~/mersal/.env
    ```
-   (الصورة النهائية لا تحوي أدوات تطوير كاملة؛ إن فشل هذا الأمر شغّله بدلًا من ذلك مرة واحدة عبر
-   `docker compose run --rm migrate npx tsx prisma/bootstrap.ts` بعد إضافة نفس متغيرات البيئة لخدمة
-   `migrate` في `docker-compose.yml`.)
-5. **اربط الخادم بكلاوفلير عبر Tunnel** (لا حاجة لفتح أي منفذ للإنترنت، ولا حتى IP ثابت):
+4. **شغّل السكربت مرة ثانية** لبدء التطبيق فعليًا:
    ```bash
-   # على الخادم نفسه
-   curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-   sudo dpkg -i cloudflared.deb
+   curl -fsSL https://raw.githubusercontent.com/KaremKhalede/mersal/main/scripts/server-setup.sh | bash
+   ```
+   هذا يشغّل قاعدة البيانات + الترحيلات + التطبيق، ويتحقق من `/api/health`، ثم يثبّت `cloudflared`.
+5. **أنشئ حساب مدير المنصة الأول** (`--entrypoint ""` يلغي أمر الترحيلات الافتراضي لخدمة `migrate`
+   ليشتغل بدلًا عنه أمر التمهيد التالي فقط لهذه المرة الواحدة):
+   ```bash
+   cd ~/mersal
+   sudo docker compose run --rm --entrypoint "" \
+     -e BOOTSTRAP_ADMIN_EMAIL=you@company.com \
+     -e BOOTSTRAP_ADMIN_PASSWORD='StrongPass!23' \
+     -e BOOTSTRAP_ADMIN_NAME='اسمك' \
+     migrate npx tsx prisma/bootstrap.ts
+   ```
+6. **اربط الخادم بكلاوفلير** — السكربت يطبع لك 4 أوامر في النهاية (نفس الخطوة تحتاج تفاعلك لأن أول
+   أمر يفتح رابط تسجيل دخول في المتصفح):
+   ```bash
    cloudflared tunnel login
    cloudflared tunnel create chargee
    cloudflared tunnel route dns chargee track.yourcompany.com
-   cloudflared tunnel run --url http://localhost:3000 chargee
+   sudo cloudflared service install && sudo systemctl start cloudflared
    ```
-   شغّله كخدمة دائمة (`cloudflared service install`) ليعمل بعد إعادة التشغيل. هذا الأسلوب هو الاستخدام
-   الرسمي لكلاوفلير لاستضافة تطبيق فعلي عبر شبكتها دون أي بنية تحتية إضافية.
+   لا حاجة لفتح أي منفذ للإنترنت ولا حتى IP ثابت — هذا الأسلوب هو الاستخدام الرسمي لكلاوفلير لاستضافة
+   تطبيق فعلي عبر شبكتها دون أي بنية تحتية إضافية.
+
+بديل مجاني آخر لو واجهت مشكلة بتوفر خوادم Oracle Free Tier في منطقتك: [Google Cloud Free Tier](https://cloud.google.com/free)
+(خادم e2-micro مجاني للأبد في مناطق محددة بأمريكا) — نفس السكربت يعمل عليه بدون تغيير.
 
 ### نسخ احتياطي لقاعدة البيانات
 
